@@ -1,0 +1,151 @@
+Build with Agora - BLR
+KNOTiC
+KNOTiC
+
+18 Nov
+Offline
+Polaris School of Technology, DivyaSree Technopark, A3, EPIP Zone, Brookefield, Bengaluru, Karnataka 560066, India
+6 Prizes
+Live
+Build with Agora - BLR
+Overview
+Tracks
+Judges
+Channels
+Prizes
+Winners
+Bengaluru, It’s Time to Build What’s Next!
+AI is moving beyond text boxes. Applications can now listen, speak, understand, and take action in real time. The next generation of AI experiences is being built right now, and we want you to be part of it.
+
+Join us for Build with Agora – Bengaluru 2026, an in-person Solo Hackathon bringing together 250+ developers, AI engineers, startup founders, and product builders for a day of innovation, experimentation, and hands-on development.
+
+This is an individual hackathon. Every participant will build, innovate, and showcase their own project.
+
+No endless presentations. No theoretical projects.
+
+Just code, creativity, collaboration, and real-time AI.
+
+Hackathon Format: Solo Participation
+This is an individual hackathon, where every participant competes independently.
+
+Build and submit your own project.
+Work on your own ideas and implementation.
+Get access to expert mentorship throughout the hackathon.
+Showcase your individual creation to the judges.
+Compete independently for exciting prizes.
+You can connect, collaborate, and network with other builders, but project submissions and competition entries must be individual.
+
+What to Expect
+Build Something Real
+Turn your ideas into working prototypes in a single day.
+
+Exciting Hackathon Challenges
+Take on real-world challenges that will test your creativity and technical skills.
+
+Expert Mentorship
+Get guidance from experienced engineers, industry experts, and developer advocates.
+
+Meet Fellow Builders
+Connect with developers, founders, and AI enthusiasts from across Bengaluru.
+
+Explore Real-Time AI
+Get hands-on experience with Agora’s Conversational AI and real-time communication technologies.
+
+Demo Your Creation
+Showcase your project, impress the judges, and compete for exciting prizes.
+
+$3,000 USD Prize Pool + PlayStation 5
+Compete for a total prize pool of $3,000 USD, featuring:
+
+Cash prizes for winning participants.
+PlayStation 5 for winners.
+Exciting gadgets and goodies.
+Recognition and opportunities to showcase your innovation.
+Detailed prize categories and judging criteria will be announced soon.
+
+Common Technology Requirements
+All hackathon projects should demonstrate the following capabilities:
+
+1. Real-Time Conversational AI
+Use Agora Conversational AI to power meaningful, low-latency, natural voice interactions. Agora RTC or Chat may also be incorporated wherever relevant.
+
+2. Natural Voice Experiences
+Integrate Murf AI Falcon TTS for natural and expressive voice output.
+
+3. Agentic Workflows
+Explore tool calling, APIs, and external integrations that enable your AI agent to perform actions beyond simply answering questions.
+
+4. End-to-End User Journeys
+Consider how your solution supports users before, during, and after the primary interaction, including relevant follow-up actions.
+
+5. Working Demonstration
+Showcase a functional prototype that demonstrates the interaction, action execution, and resulting outcome.
+
+Think Beyond the Conversation
+The tracks and example solutions are intended to inspire innovation, not limit it.
+
+We encourage participants to think beyond traditional voice assistants and explore how real-time conversational AI can become an intelligent, action-oriented experience.
+
+Consider how your solution can:
+
+Move from Conversation to Action: Use tools, APIs, and connected services to turn conversations into meaningful actions.
+Deliver Complete User Journeys: Include preparation, real-time engagement, task execution, and follow-up.
+Demonstrate Contextual Intelligence: Remember relevant information and adapt to individual user needs.
+Support Multi-Step Decision-Making: Handle complex workflows, error scenarios, and human intervention wherever appropriate.
+Introduce Multimodal Experiences: Experiment with voice, video, visual interfaces, and physical devices.
+Solve Real-World Problems: Build practical, scalable, and thoughtfully designed solutions.
+Participants are welcome to go beyond the suggested use cases, experiment with additional technologies, and introduce creative capabilities that demonstrate the broader potential of Agentic AI.
+
+The goal is not simply to build an AI that talks, but to build an AI that gets things done.
+
+Who Should Participate?
+Whether you’re a:
+
+AI/ML Engineer
+Android, iOS, Web, or Full-Stack Developer
+Indie Hacker
+Startup Founder or Product Builder
+Developer exploring Voice AI and AI Agents
+Student or technology enthusiast
+If you love building things, this hackathon is for you.
+
+Important: This is a solo hackathon. Team registrations and group submissions are not permitted.
+
+No prior Agora experience is required. Just bring your curiosity, creativity, and willingness to build.
+
+Event Details
+Event: Build with Agora – Bengaluru 2026
+Format: Individual / Solo Hackathon
+Date: Saturday, 21 November 2026
+Time: 8:30 AM – 6:30 PM IST
+Venue: Bengaluru, India
+Expected Participation: 250+ Individual Builders
+Prize Pool: $3,000 USD + PlayStation 5 + Exciting Gadgets
+Registration: Mandatory | Limited Seats
+
+What to Bring
+Your laptop and charger.
+Your favourite development tools.
+Your ideas and technical skills.
+An open mind and willingness to experiment.
+Come independently, build independently, and showcase what you can create!
+
+Ready to Build?
+Some of the best innovations begin with a simple question: What if?
+
+This November, we’re bringing Bengaluru’s developer ecosystem together to turn those questions into real-world experiences.
+
+One day. One room. 250+ individual builders. Endless possibilities.
+
+Register now and get ready to Build with Agora!
+
+Join Our Discord Community:
+https://discord.com/invite/9Vg3Qafc7
+
+Organized by Agora (NASDAQ: API)
+Powered by KNOTiC
+
+Powering real-time engagement and conversational AI experiences.
+
+Comments
+Start a new conversation!

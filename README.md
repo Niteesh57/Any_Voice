@@ -1,14 +1,20 @@
-# Hi Audio Probe — stage 1
+# Any Voice — stage 1
 
 Native Android experiment for a OnePlus 7 running Android 10 or newer. No translation yet.
 
+Any Voice explores replacing an app's original spoken audio with speech in the listener's chosen language. Stage 1 proves the audio path using repeated “hi” output. The user reported the prototype working on their OnePlus 7; translation and universal app/call support are not yet implemented.
+
+Built in the context of **Build with Agora – Bengaluru 2026**, organized by Agora and powered by KNOTiC. See [hackathon context and next steps](docs/HACKATHON.md) and the [provided event brief](docs/hackathon-brief.txt). The current prototype uses Android playback capture and Android text-to-speech; Agora Conversational AI and Murf Falcon TTS are not integrated yet.
+
 ## Install and try
 
-Install `dist/HiAudioProbe-debug.apk` on the phone (allow installation from the file manager when Android asks).
+Install `dist/AnyVoice-debug.apk` on the phone (allow installation from the file manager when Android asks).
+
+The APK is generated locally; binaries are not committed. Build and copy it using the commands below.
 
 1. Make the phone's **alarm volume** audible. The app does not change alarm volume.
 2. Play a spoken YouTube video using the **phone speaker**. Begin with ordinary, unprotected media.
-3. Open **Hi Audio Probe**. Optionally enable floating controls using the settings button.
+3. Open **Any Voice**. Optionally enable floating controls using the settings button.
 4. Tap **Start capture + mute + hi**, allow audio capture, then approve Android's capture prompt. On versions offering a screen-sharing choice, choose the entire screen for switching apps. The app never creates a virtual display or captures screen images.
 5. Return to the video. It should continue visually, with media sound muted. If captured audio energy is detected, the app says “hi” about once a second using the alarm stream.
 6. Inspect the floating panel, or return to the app for diagnostics. **Non-silent buffers while muted** must keep increasing. Use **Original / replacement comparison** to compare capture with sound restored. Hi is paused in comparison mode.
@@ -42,13 +48,15 @@ Requires JDK 17+ (tested with JDK 21), Android SDK platform 36, and Android Grad
 
 ```powershell
 .\gradlew.bat :app:assembleDebug :app:lintDebug
-adb install -r .\dist\HiAudioProbe-debug.apk
+New-Item -ItemType Directory -Path dist -Force
+Copy-Item .\app\build\outputs\apk\debug\app-debug.apk .\dist\AnyVoice-debug.apk
+adb install -r .\dist\AnyVoice-debug.apk
 ```
+
+To uninstall, stop the session first, then run `adb uninstall dev.hiprobe`. The application ID remains `dev.hiprobe` for compatibility with the first installed prototype; the displayed product name is Any Voice.
 
 Source: `app/src/main/java/dev/hiprobe/`. Debug-signed APK is for direct device testing.
 
 See `VALIDATION.md` for measured emulator results and remaining physical-device checks. `test-source` is a separate developer-only known-audio fixture, not part of the probe APK.
 
 References: [Android playback capture](https://developer.android.com/media/platform/av-capture), [media projection service requirements](https://developer.android.com/media/grow/media-projection).
-
-# Any_Voice
