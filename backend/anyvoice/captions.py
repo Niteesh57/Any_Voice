@@ -38,7 +38,9 @@ def decode_message(data: bytes, source_uid: int):
                 raise ValueError("Invalid translated caption texts")
             final_parts.extend(texts)
     if final_parts:
-        yield {"kind": "translation", "id": str(identity), "text": "".join(final_parts)}
+        offset, duration = translation.get("offset"), translation.get("duration")
+        end_ms = offset + duration if isinstance(offset, (int, float)) and isinstance(duration, (int, float)) else None
+        yield {"kind": "translation", "id": str(identity), "text": "".join(final_parts), "speech_end_ms": end_ms}
 
 
 class FinalizedCaptions:
@@ -50,7 +52,7 @@ class FinalizedCaptions:
         if text == previous or previous.startswith(text):
             return ""
         if not text.startswith(previous):
-            raise ValueError("Previously finalized caption changed; restart to resynchronize")
+            raise ValueError("Previously finalized caption changed")
         if len(self.prefixes) >= 2000 and identity not in self.prefixes:
             raise ValueError("Caption count limit reached; start a new session")
         self.prefixes[identity] = text

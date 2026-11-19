@@ -42,6 +42,40 @@ final class BackendClient {
     }
     JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id, null); }
     void stop(String id) throws Exception { request("POST", "/v1/sessions/" + id + "/stop", new JSONObject()); }
+    JSONObject audioManifest(String id, int after) throws Exception {
+        return request("GET", "/v1/sessions/" + id + "/audio?after=" + after, null);
+    }
+    HttpURLConnection audioStream(String id, int after) throws Exception {
+        validate(base);
+        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream?after=" + after).openConnection();
+        c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(10000);
+        c.setRequestProperty("Authorization", "Bearer " + access);
+        if (c.getResponseCode() != 200) { c.disconnect(); throw new IOException("Audio stream unavailable"); }
+        return c;
+    }
+    void audioPlayed(String id, int sequence) throws Exception {
+        request("POST", "/v1/sessions/" + id + "/audio/" + sequence + "/played", new JSONObject());
+    }
+    byte[] audioClip(String id, int sequence, int expectedBytes) throws Exception {
+        validate(base);
+        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/audio/" + sequence).openConnection();
+        c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(15000);
+        c.setRequestProperty("Authorization", "Bearer " + access);
+        try {
+            if (c.getResponseCode() != 200) throw new IOException("Audio download failed (" + c.getResponseCode() + ")");
+            if (expectedBytes < 2 || expectedBytes > 16000 * 2 * 90 || expectedBytes % 2 != 0)
+                throw new IOException("Invalid prepared audio length");
+            try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192]; int n;
+                while ((n = in.read(buffer)) != -1) {
+                    if (out.size() + n > expectedBytes) throw new IOException("Audio download exceeded expected length");
+                    out.write(buffer, 0, n);
+                }
+                if (out.size() != expectedBytes) throw new IOException("Audio download incomplete");
+                return out.toByteArray();
+            }
+        } finally { c.disconnect(); }
+    }
 
     private JSONObject request(String method, String path, JSONObject body) throws Exception {
         validate(base);

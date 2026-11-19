@@ -25,6 +25,7 @@ class AgoraTransport:
         self.service = self.connection = None
         self.observer = self.audio_observer = self.local_observer = None
         self.connected = asyncio.Event()
+        self.on_pcm = None
 
     async def open(self, on_caption, on_speech, on_error):
         from agora.rtc.agora_service import AgoraService
@@ -35,6 +36,7 @@ class AgoraTransport:
         loop = asyncio.get_running_loop()
         ready = self.connected
         session = self.session
+        owner = self
 
         class ConnectionObserver(IRTCConnectionObserver):
             def on_connected(self, connection, info, reason):
@@ -53,6 +55,8 @@ class AgoraTransport:
             def on_playback_audio_frame_before_mixing(self, local, channel, uid, frame, vad_state, vad_audio):
                 if str(uid) == str(session.worker_uid):
                     pcm = bytes(frame.buffer)
+                    if owner.on_pcm:
+                        loop.call_soon_threadsafe(owner.on_pcm, pcm)
                     samples = array.array("h")
                     samples.frombytes(pcm[:len(pcm) // 2 * 2])
                     if samples and sum(v*v for v in samples) / len(samples) > 2500:

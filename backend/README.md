@@ -43,19 +43,22 @@ adb reverse tcp:8000 tcp:8000
 
 In Any Voice → Connection settings, use `http://127.0.0.1:8000` and the `ANYVOICE_ACCESS_TOKEN`. The public HTTPS address is still needed for Agora's callback configuration. Alternatively use the public HTTPS address directly on the phone. Arbitrary cleartext Internet/LAN URLs are rejected by the app; loopback cleartext is for local development only.
 
-The container doesn't require a microphone or audio device, and it does not record audio files. Ensure the host network permits Agora traffic; the HTTP port alone isn't the worker's complete network requirement.
+The container doesn't require a microphone or audio device. Version 0.8 stores sequenced Telugu PCM packets temporarily until the phone acknowledges playback or the session is cleaned up. Ensure the host network permits Agora traffic; the HTTP port alone isn't the worker's complete network requirement.
 
 ## Audio and control flow
+
+Latency tuning: text requests may use the full 512-byte provider limit while audio remains streamed in 50 ms packets. This avoids extra TTS startups without waiting to fill a text request. `MURF_SPEECH_RATE=15` modestly accelerates generated speech; set it to 0 for normal delivery. Timing logs distinguish provider-timestamp speech-end-to-translation (clock-dependent), caption queue wait, and TTS first audio. Logs contain timings and byte counts, not speech text.
 
 For same-Wi-Fi debugging, publish port 8000 on the host and enter `http://COMPUTER_WIFI_IP:8000` in Android Connection settings. Debug builds allow private IPv4 HTTP addresses; release builds require HTTPS except loopback. The default address can be supplied at build time with `-PanyVoiceBackendUrl=http://COMPUTER_WIFI_IP:8000`; it stays editable in the UI. No credentials are compiled into the APK. The public HTTPS callback is still required by Agora. Allow inbound TCP 8000 on the trusted private network if Windows Firewall blocks phone access.
 
 1. The authenticated phone requests a session. Backend creates fresh channel/tokens and joins as a silent control participant.
 2. Backend starts STT with source `en-IN`, translation target `te-IN`, JSON/gzip captions, and a subscription limited to the phone source UID.
-3. Backend starts a Conversational AI voice agent with Murf Falcon `te-IN` and manual turns. Android plays only this agent's audio.
+3. Backend starts a Conversational AI voice agent with Murf Falcon `te-IN` and manual turns. Backend receives its 16 kHz PCM; Android disables automatic RTC audio subscriptions.
 4. Native worker receives caption data from the STT bot. It ignores other senders, other source UIDs, other target languages and unfinished text.
 5. Final caption prefixes are deduplicated by sentence identity. Genuine repetitions with new IDs remain audible.
 6. Telugu text is split under the engine's **512-byte UTF-8 limit**, preserving characters and order. Broadcasts use `APPEND` and `interruptable=false`.
-7. Worker observes the voice agent's audio energy and waits for a quiet tail before advancing. This pacing heuristic requires live speech testing; long internal pauses may affect it. Queues are bounded and report an error rather than silently discarding content.
+7. Incoming voice-agent PCM is packetized into 1600-byte (50 ms) mono 16 kHz PCM16 packets immediately, before the `turn.finished` event. Completion events only order TTS commands; there is no full-phrase delivery gate, 500 ms text batching delay or 350 ms audio tail wait. Residual partial packets flush at turn end. Late RTC frames remain part of the continuous stream.
+8. Android maintains one persistent `/pcm-stream` connection, reconnecting after the last fully queued sequence. Binary frames use network-order uint32 sequence + uint32 byte count + raw PCM; zero/zero is a keepalive. Android starts with approximately 100 ms of audio, buffers at most 100 packets (5 seconds) in app memory, and writes continuously without waiting at packet boundaries. Playback-head counters provide cumulative acknowledgements independently. New packets never flush or replace existing AudioTrack content.
 8. Stop, errors, session expiry or a missing phone heartbeat tear down both cloud agents and the worker connection. The phone restores original media volume.
 
 UIDs: phone source 1001, voice agent 2001, silent control 3001, STT bot 4001. They are unique per fresh session channel. Generated RTC tokens expire shortly after the maximum session lifetime (15 minutes). Another session can start after cleanup finishes.
@@ -65,6 +68,10 @@ UIDs: phone source 1001, voice agent 2001, silent control 3001, STT bot 4001. Th
 All `/v1/*` routes require `Authorization: Bearer <ANYVOICE_ACCESS_TOKEN>`.
 
 - `GET /health`: basic process health, no secrets.
+- `GET /v1/sessions/{id}/pcm-stream?after=N`: persistent framed PCM stream; live generation wakes the stream immediately.
+- `GET /v1/sessions/{id}/audio?after=N`: authenticated manifest of prepared clips after sequence N.
+- `GET /v1/sessions/{id}/audio/{sequence}`: complete immutable PCM bytes, 16 kHz mono PCM16 little endian.
+- `POST /v1/sessions/{id}/audio/{sequence}/played`: acknowledge completed playback and delete queued clips through that sequence. Provider errors retain completed clips for draining; explicit Stop deletes the queue.
 - `GET /v1/capabilities`: missing setting names, native SDK availability and fixed language pair. “Configured” means local prerequisites exist, not that provider credentials were accepted.
 - `POST /v1/sessions`: body `{"source_language":"en-IN","target_language":"te-IN"}`; returns client RTC connection data after cloud agent creation.
 - `GET /v1/sessions/{id}`: captions and state; also renews the phone heartbeat lease.

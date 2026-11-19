@@ -13,6 +13,7 @@ class Settings:
     murf_key: str = ""
     public_url: str = ""
     voice: str = "Jaya"
+    voice_rate: int = 15
     max_seconds: int = 900
 
     @classmethod
@@ -26,6 +27,7 @@ class Settings:
             murf_key=os.getenv("MURF_API_KEY", ""),
             public_url=os.getenv("ANYVOICE_PUBLIC_URL", "").rstrip("/"),
             voice=os.getenv("MURF_VOICE_ID", "Jaya"),
+            voice_rate=max(-50, min(50, int(os.getenv("MURF_SPEECH_RATE", "15")))),
             max_seconds=min(900, max(60, int(os.getenv("MAX_SESSION_SECONDS", "900")))),
         )
 

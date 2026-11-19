@@ -6,6 +6,10 @@ Any Voice captures permitted app audio, silences original media output and plays
 
 ## Current pipeline
 
+Version **0.8** streams generated Telugu PCM immediately in **50 ms packets** over one persistent authenticated HTTP connection. It no longer waits for a complete phrase before sending audio. Android uses a roughly **100 ms starting buffer**, writes at most 100 ms per call, and keeps one persistent AudioTrack fed continuously. There is no per-packet playback-completion wait and no automatic backlog pause/restart behavior.
+
+Stable Telugu text goes to Agora Conversational AI + Murf Falcon immediately. Provider completion events order TTS requests, while audio delivery runs independently during generation. Packet sizes are transport units, not a promise of 50/100 ms end-to-end translation latency. Recognition, language context and network time still contribute; target speech that takes longer than the source can still accumulate delay. Audio is transient and deleted after playback acknowledgement or session cleanup. Explicit Stop remains immediate; sessions retain the existing 15-minute limit.
+
 **Android app audio → Agora RTC → Agora Real-Time STT + Telugu translation → Conversational AI Engine → Murf Falcon → Agora RTC → Android speaker**
 
 Agora performs recognition and translation. Falcon generates speech through the Conversational AI agent's `speak` API. There is no separate translation API, translation model, Finch recognizer or third provider account.

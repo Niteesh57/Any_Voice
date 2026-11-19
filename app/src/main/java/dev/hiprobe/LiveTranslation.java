@@ -6,6 +6,7 @@ import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.os.SystemClock;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import io.agora.rtc2.*;
 import io.agora.rtc2.audio.AudioTrackConfig;
 import java.util.concurrent.*;
@@ -26,10 +27,22 @@ final class LiveTranslation {
     private volatile boolean joined;
     private volatile String sessionId;
     private volatile boolean outputEnabled = true;
+    private volatile int playedSequence;
+    private int acknowledgedSequence;
+    private volatile int downloadedSequence;
+    private volatile String terminalMessage;
+    private volatile int terminalSequence;
     private int customTrack = -1;
     private int workerUid;
     private AudioTrack output;
-    private Thread playback, publishing;
+    private Thread playback, publishing, downloading;
+    private volatile java.net.HttpURLConnection audioConnection;
+    private final ArrayBlockingQueue<PreparedAudio> prepared = new ArrayBlockingQueue<>(100);
+    private static final class PreparedAudio {
+        final int sequence; final byte[] pcm;
+        PreparedAudio(int sequence, byte[] pcm) { this.sequence = sequence; this.pcm = pcm; }
+    }
+
 
     LiveTranslation(Context context, Listener listener) {
         this.context = context.getApplicationContext(); this.listener = listener; backend = new BackendClient(context);
@@ -39,6 +52,8 @@ final class LiveTranslation {
             try {
                 JSONObject data = backend.start();
                 sessionId = data.getString("id");
+                if (!"queued-pcm".equals(data.optString("playback_mode")))
+                    throw new IllegalStateException("Backend needs the queued-audio update");
                 if (closed.get()) { stopRemote(); return; }
                 workerUid = data.getInt("worker_uid");
                 initialize(data);
@@ -70,21 +85,22 @@ final class LiveTranslation {
         engine = RtcEngine.create(config);
         require(engine.enableAudio(), "enable audio");
         require(engine.enableLocalAudio(false), "disable microphone capture");
-        require(engine.setExternalAudioSink(true, 48000, 1), "configure translated audio output");
+        // RTC uploads English only. Prepared Telugu is played by our own ordered AudioTrack.
         AudioTrackConfig trackConfig = new AudioTrackConfig();
         trackConfig.enableLocalPlayback = false;
         customTrack = engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE, trackConfig);
         if (customTrack < 0) throw new IllegalStateException("Could not create source audio track");
-        int minimum = AudioTrack.getMinBufferSize(48000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        int minimum = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minimum <= 0) throw new IllegalStateException("Audio output format unavailable");
         output = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE).build())
-            .setAudioFormat(new AudioFormat.Builder().setSampleRate(48000).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+            .setAudioFormat(new AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-            .setBufferSizeInBytes(Math.max(minimum * 2, 9600)).setTransferMode(AudioTrack.MODE_STREAM).build();
+            .setBufferSizeInBytes(Math.max(minimum, 3200)).setTransferMode(AudioTrack.MODE_STREAM).build();
         output.setVolume(0.75f); output.play();
         playback = new Thread(this::render, "TeluguPlayback"); playback.start();
+        downloading = new Thread(this::downloadAudio, "TeluguPrefetch"); downloading.start();
         publishing = new Thread(this::publish, "EnglishUpload"); publishing.start();
         ChannelMediaOptions options = new ChannelMediaOptions();
         options.channelProfile = Constants.CHANNEL_PROFILE_LIVE_BROADCASTING;
@@ -93,7 +109,7 @@ final class LiveTranslation {
         options.publishCameraTrack = false;
         options.publishCustomAudioTrack = true;
         options.publishCustomAudioTrackId = customTrack;
-        options.autoSubscribeAudio = true; options.autoSubscribeVideo = false;
+        options.autoSubscribeAudio = false; options.autoSubscribeVideo = false;
         require(engine.joinChannel(data.getString("token"), data.getString("channel"), data.getInt("uid"), options), "join channel");
     }
     private void poll() {
@@ -101,19 +117,27 @@ final class LiveTranslation {
         try {
             JSONObject status = backend.status(sessionId);
             String state = status.getString("state");
-            if (state.equals("error") || state.equals("stopped")) { fail(status.optString("message", "Session ended")); return; }
+            if (state.equals("error") || state.equals("stopped")) {
+                terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
+                terminalMessage = status.optString("message", "Session ended");
+            }
             ProbeState.sourceText = status.optString("source_text");
             ProbeState.translatedText = status.optString("translated_text");
             ProbeState.phrases = status.optInt("phrases");
             ProbeState.message = status.optString("message", "Listening to English");
+            if (playedSequence > acknowledgedSequence) {
+                int completed = playedSequence;
+                try { backend.audioPlayed(sessionId, completed); acknowledgedSequence = completed; }
+                catch (Exception ignored) { /* Retry on the next heartbeat; playback continues. */ }
+            }
         } catch (Exception e) { fail("Connection to backend lost. Original audio will be restored."); }
     }
     void send(short[] samples, int count) {
-        if (!joined || closed.get()) return;
+        if (!joined || closed.get() || terminalMessage != null) return;
         // AudioRecord reads 20 ms at a time; preserve little-endian PCM16.
         byte[] bytes = new byte[count * 2];
         for (int i = 0; i < count; i++) { bytes[2*i] = (byte)samples[i]; bytes[2*i+1] = (byte)(samples[i] >> 8); }
-        if (!upload.offer(bytes)) fail("Audio upload fell behind. Stop and restart.");
+        if (!upload.offer(bytes)) fail("Audio upload connection is congested.");
     }
     private void publish() {
         try {
@@ -127,21 +151,63 @@ final class LiveTranslation {
         } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         catch (RuntimeException e) { if (!closed.get()) fail(e.getMessage()); }
     }
+    private void downloadAudio() {
+        int after = 0;
+        while (!closed.get()) {
+            java.net.HttpURLConnection connection = null;
+            try {
+                if (!joined || sessionId == null) { Thread.sleep(50); continue; }
+                connection = backend.audioStream(sessionId, after); audioConnection = connection;
+                try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(connection.getInputStream()))) {
+                    while (!closed.get()) {
+                        int sequence = in.readInt(), size = in.readInt();
+                        if (sequence == 0 && size == 0) continue;
+                        if (sequence != after + 1 || size < 2 || size > 3200 || size % 2 != 0)
+                            throw new java.io.IOException("Invalid audio packet");
+                        byte[] pcm = new byte[size]; in.readFully(pcm);
+                        prepared.put(new PreparedAudio(sequence, pcm));
+                        after = sequence; downloadedSequence = sequence;
+                    }
+                }
+            } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            catch (Exception e) {
+                if (closed.get()) return;
+                try { Thread.sleep(100); } catch (InterruptedException interrupted) { return; }
+            } finally {
+                if (connection != null) connection.disconnect();
+                audioConnection = null;
+            }
+        }
+    }
     private void render() {
-        byte[] frame = new byte[960]; // 10 ms at 48 kHz, mono PCM16.
+        long framesWritten = 0;
+        java.util.ArrayDeque<long[]> ends = new java.util.ArrayDeque<>();
+        boolean first = true;
         try {
             while (!closed.get()) {
-                RtcEngine rtc = engine;
-                if (!joined || rtc == null) { Thread.sleep(10); continue; }
-                int code = rtc.pullPlaybackAudioFrame(frame, frame.length);
-                if (code == 0 && outputEnabled) {
-                    int offset = 0;
-                    while (offset < frame.length && !closed.get()) {
-                        int written = output.write(frame, offset, frame.length - offset, AudioTrack.WRITE_BLOCKING);
-                        if (written <= 0) throw new IllegalStateException("Translated audio playback stopped");
-                        offset += written;
-                    }
-                } else Thread.sleep(10);
+                long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
+                while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed)
+                    playedSequence = (int)ends.removeFirst()[0];
+                PreparedAudio clip = prepared.poll(50, TimeUnit.MILLISECONDS);
+                if (clip == null) {
+                    if (terminalMessage != null && downloadedSequence >= terminalSequence && ends.isEmpty()) { fail(terminalMessage); return; }
+                    continue;
+                }
+                // Start with approximately 100 ms of audio; keep writing continuously after that.
+                if (first) {
+                    long deadline = SystemClock.elapsedRealtime() + 100;
+                    while (prepared.isEmpty() && SystemClock.elapsedRealtime() < deadline && !closed.get()) Thread.sleep(5);
+                    first = false;
+                }
+                int offset = 0;
+                while (offset < clip.pcm.length && !closed.get()) {
+                    int count = Math.min(3200, clip.pcm.length - offset); // at most 100 ms per write
+                    int written = output.write(clip.pcm, offset, count, AudioTrack.WRITE_BLOCKING);
+                    if (written <= 0) throw new IllegalStateException("Translated audio playback stopped");
+                    offset += written; framesWritten += written / 2;
+                }
+                ends.addLast(new long[]{clip.sequence, framesWritten});
+                // No per-packet completion wait: queued samples never replace existing samples.
             }
         } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         catch (RuntimeException e) { if (!closed.get()) fail("Translated audio playback failed"); }
@@ -155,14 +221,16 @@ final class LiveTranslation {
     void close() {
         if (!closed.compareAndSet(false, true)) return;
         stopping = true;
-        joined = false; outputEnabled = false; upload.clear();
+        if (audioConnection != null) audioConnection.disconnect();
+        joined = false; outputEnabled = false; upload.clear(); prepared.clear();
         new Thread(() -> {
             try {
             synchronized (this) {
                 if (publishing != null) publishing.interrupt();
+                if (downloading != null) downloading.interrupt();
                 if (playback != null) playback.interrupt();
                 if (output != null) { try { output.pause(); output.flush(); } catch (RuntimeException ignored) { } }
-                join(publishing); join(playback);
+                join(publishing); join(playback); join(downloading);
                 if (engine != null) {
                     engine.leaveChannel();
                     if (customTrack >= 0) engine.destroyCustomAudioTrack(customTrack);

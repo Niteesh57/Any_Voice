@@ -94,6 +94,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         voice = calls[1][1]["properties"]
         self.assertEqual(voice["tts"]["vendor"], "murf")
         self.assertEqual(voice["tts"]["params"]["locale"], "te-IN")
+        self.assertEqual(voice["tts"]["params"]["rate"], configured().voice_rate)
         self.assertEqual(voice["remote_rtc_uids"], ["3001"])
         self.assertEqual(voice["turn_detection"]["config"]["start_of_speech"]["mode"], "manual")
         self.assertEqual(calls[2][1], {"text": "నమస్కారం", "priority": "APPEND", "interruptable": False})
@@ -152,6 +153,14 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stopped.json()["state"], "stopped")
 
 
+class FakeCompletion:
+    def __init__(self): self.done = asyncio.Event()
+    def begin(self): self.done.clear()
+    async def open(self): pass
+    async def wait(self): await self.done.wait()
+    async def close(self): pass
+
+
 class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_captions_speak_and_stop_close_both_services(self):
         class FakeTransport:
@@ -161,10 +170,12 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         class FakeServices:
             def __init__(self): self.spoken = []; self.closed = False
             async def open(self): pass
-            async def speak(self, text): self.spoken.append(text); rtc.on_speech()
+            async def speak(self, text):
+                self.spoken.append(text); rtc.on_speech(); rtc.on_pcm(b"\x01\x00" * 1600); completion.done.set()
             async def close(self): self.closed = True; return []
         services, session = FakeServices(), Session()
-        pipeline = Pipeline(configured(), session, transport=rtc, services=services)
+        completion = FakeCompletion()
+        pipeline = Pipeline(configured(), session, transport=rtc, services=services, completion=completion)
         task = asyncio.create_task(pipeline.run())
         await asyncio.wait_for(session.ready.wait(), 1)
         data = gzip.compress(json.dumps(caption()).encode())
@@ -172,6 +183,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.95)
         self.assertEqual(services.spoken, ["నమస్కారం"])
         self.assertEqual(session.phrases, 1)
+        self.assertEqual(session.audio.next_sequence, 3)
         session.stopped.set(); await asyncio.wait_for(task, 1)
         self.assertTrue(services.closed and rtc.closed)
 

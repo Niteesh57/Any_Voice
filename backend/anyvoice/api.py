@@ -5,7 +5,7 @@ import time
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from .config import Settings
@@ -37,12 +37,14 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             if session.task:
                 session.task.cancel()
         await asyncio.gather(*(s.task for s in sessions.values() if s.task), return_exceptions=True)
+        for session in sessions.values():
+            if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.3", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.8", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.3"}
+        return {"service": "Any Voice", "version": "0.8"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -74,6 +76,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         async with creating:
             for sid, old in list(sessions.items()):
                 if old.stopped.is_set() and time.monotonic() - old.touched > 60:
+                    if old.audio: old.audio.close()
                     del sessions[sid]
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
@@ -116,7 +119,42 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             session.task.cancel()
             await asyncio.gather(session.task, return_exceptions=True)
         session.source = session.translated = ""
+        if session.audio: session.audio.close()
         return session.public()
+
+    @app.get("/v1/sessions/{sid}/audio", dependencies=[Depends(auth)])
+    async def audio_manifest(sid: str, after: int = 0):
+        session = sessions.get(sid)
+        if not session or not session.audio:
+            raise HTTPException(404, "Audio session not found")
+        return session.audio.manifest(max(0, after))
+
+    @app.get("/v1/sessions/{sid}/pcm-stream", dependencies=[Depends(auth)])
+    async def pcm_stream(sid: str, after: int = 0):
+        session = sessions.get(sid)
+        if not session or not session.audio:
+            raise HTTPException(404, "Audio session not found")
+        return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set()),
+            media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
+
+    @app.get("/v1/sessions/{sid}/audio/{sequence}", dependencies=[Depends(auth)])
+    async def audio_clip(sid: str, sequence: int):
+        session = sessions.get(sid)
+        row = session.audio.clips.get(sequence) if session and session.audio else None
+        if not row:
+            raise HTTPException(404, "Audio clip not available")
+        return FileResponse(row['path'], media_type="application/octet-stream")
+
+    @app.post("/v1/sessions/{sid}/audio/{sequence}/played", dependencies=[Depends(auth)])
+    async def played(sid: str, sequence: int):
+        session = sessions.get(sid)
+        if not session or not session.audio:
+            raise HTTPException(404, "Audio session not found")
+        try:
+            session.audio.acknowledge(sequence)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"acknowledged": session.audio.acknowledged}
 
     app.state.sessions = sessions
     return app

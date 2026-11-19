@@ -1,5 +1,22 @@
 # Stage 1 validation
 
+## Streaming audio 0.8 — 2026-11-19
+
+Later timing review: 15 real voice requests had median first audio 697 ms (265–752 ms). Total generation/control time was 90331 ms for 79950 ms of PCM, a 10381 ms difference. The path includes Agora, Murf, RTC and turn signaling; this is not isolated Murf model latency. Text request limits were increased from 256 to 512 UTF-8 bytes without waiting to fill requests, and configurable Murf rate 15 was enabled. A controlled direct Falcon test produced 5559 ms of PCM at rate 15 versus 5910 ms at rate 0 for the same text; speech rate is not an end-to-end latency guarantee. Translation and queue-wait instrumentation was added. 18 tests and live pre-completion packet streaming passed after tuning.
+
+- Full-phrase buffering, the 500 ms text batching delay, 350 ms tail hold, and Android's per-packet completion wait were removed. Generated PCM now becomes available in 50 ms packets over one persistent framed HTTP stream.
+- Android build/lint and 18 backend tests passed. Tests include live queue wakeup, binary framing, resume after a sequence, byte preservation, and packets becoming available before provider completion without interrupting the current TTS command.
+- Real Agora Conversational AI + Murf Falcon test: first 1600-byte packet was available while the turn was still speaking, approximately 456 ms after submitting known Telugu text. 147 packets totaling 7350 ms were retained in order. This is text-to-first-PCM timing, not English-audio-to-Telugu latency.
+- Phone uses approximately 100 ms initial buffering and writes continuously to one persistent AudioTrack. Playback acknowledgements are independent of writes. End-to-end audibility and long-video lag require user listening; packet size is not an end-to-end latency guarantee.
+
+## Queued live audio 0.7 — 2026-11-19
+
+- Android build/lint passed. Version 0.7 installed on OnePlus 7; backend rebuilt for RTM completion events and authenticated PCM delivery.
+- 17 backend tests passed on Windows and Linux, including byte-preserving audio delivery, authentication, ordered manifests, cumulative/idempotent acknowledgement, cleanup, unfinished audio not being exposed during internal pauses, and processing text older than the removed age cutoff.
+- Real Agora Conversational AI + Murf Falcon test produced two complete, nonzero 16 kHz PCM clips (2150 ms and 1670 ms), retained both in order, and removed them after acknowledgement. Source test text deliberately exceeded the old 15-second age threshold.
+- No automatic YouTube pause state or backlog restart instruction is used. The Android player no longer renders live agent audio directly: it downloads completed clips, writes every sample through one persistent AudioTrack, and checks playback-head completion.
+- Actual OnePlus speaker audibility and long-running queue fluency require user listening. Full-phrase preparation adds initial latency; slower target-language speech can still accumulate delay. Explicit Stop, network/process failures, and the existing session limit remain practical limits.
+
 ## English-to-Telugu integration — 2026-11-19
 
 - Android `:app:assembleDebug :app:lintDebug -PtargetAbi=arm64-v8a`: passed. The packaged phone build is approximately 41 MB and retains application ID `dev.hiprobe`.

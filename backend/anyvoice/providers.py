@@ -61,7 +61,7 @@ class AgoraServices:
                 "tts": {"vendor": "murf", "params": {
                     "api_key": self.settings.murf_key, "base_url": "wss://global.api.murf.ai/v1/speech/stream-input",
                     "voiceId": self.settings.voice, "locale": "te-IN", "model": "falcon-2.1",
-                    "rate": 0, "pitch": 0, "sample_rate": 24000,
+                    "rate": self.settings.voice_rate, "pitch": 0, "sample_rate": 24000,
                 }},
                 "turn_detection": {"mode": "default", "config": {
                     "start_of_speech": {"mode": "manual"}, "end_of_speech": {"mode": "manual"},

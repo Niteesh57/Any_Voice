@@ -7,6 +7,8 @@ import logging
 from .captions import FinalizedCaptions, decode_message, speech_chunks
 from .providers import AgoraServices, ProviderError
 from .rtc import AgoraTransport
+from .completion import SpeechCompletion
+from .audio_queue import AudioQueue
 
 
 @dataclass
@@ -28,11 +30,14 @@ class Session:
     stopped: asyncio.Event = field(default_factory=asyncio.Event)
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
+    audio: object = None
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
                 "source_text": self.source, "translated_text": self.translated,
                 "phrases": self.phrases, "audio_frames": self.audio_frames,
+                "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
+                "last_audio_sequence": self.audio.next_sequence - 1 if self.audio else 0,
                 "source_language": "en-IN", "target_language": "te-IN"}
 
 
@@ -46,7 +51,7 @@ def token_for(settings, session, uid):
     rtc.add_privilege(ServiceRtc.kPrivilegePublishAudioStream, lifetime)
     rtc.add_privilege(ServiceRtc.kPrivilegePublishDataStream, lifetime)
     token.add_service(rtc)
-    if uid == session.worker_uid:
+    if uid in (session.worker_uid, session.control_uid):
         rtm = ServiceRtm(str(uid))
         rtm.add_privilege(ServiceRtm.kPrivilegeLogin, lifetime)
         token.add_service(rtm)
@@ -54,12 +59,18 @@ def token_for(settings, session, uid):
 
 
 class Pipeline:
-    def __init__(self, settings, session, transport=None, services=None):
+    def __init__(self, settings, session, transport=None, services=None, completion=None):
         self.settings, self.session = settings, session
         token = lambda uid: token_for(settings, session, uid)
         self.rtc = transport or AgoraTransport(settings, session, token(session.control_uid))
         self.services = services or AgoraServices(settings, session, token)
-        self.phrases = asyncio.Queue(maxsize=8)
+        self.completion = completion or SpeechCompletion(settings, session, token(session.control_uid))
+        self.phrases = asyncio.Queue()
+        self.session.audio = AudioQueue()
+        self.capture = None
+        self.streaming_started = False
+        self.packet_buffer = bytearray()
+        self.rtc.on_pcm = self.receive_pcm
         self.finals = FinalizedCaptions()
         self.error = asyncio.get_running_loop().create_future()
         self.work = []
@@ -91,58 +102,64 @@ class Pipeline:
                 else:
                     delta = self.finals.accept(item["id"], item["text"])
                     if delta.strip():
+                        end_ms = item.get('speech_end_ms')
+                        if end_ms is not None and 0 <= time.time()*1000-end_ms < 120000:
+                            self.log.info('latency session=%s stage=speech_end_to_translation ms=%.0f',
+                                self.session.id[:8], time.time()*1000-end_ms)
                         self.session.translated = item["text"]
                         self.phrases.put_nowait((delta, time.monotonic()))
-        except asyncio.QueueFull:
-            self.fail("Translation is falling behind. Pause the video and restart to resynchronize.")
         except Exception as exc:
             logging.getLogger("anyvoice").error("Caption decode failed: %s; bytes=%s; prefix=%s", type(exc).__name__, len(data), data[:12].hex())
-            self.fail("Could not process Agora captions. Stop and restart the session.")
+            self.fail("Could not process Agora captions.")
+
+    def receive_pcm(self, pcm):
+        if not self.streaming_started or self.session.stopped.is_set(): return
+        self.packet_buffer.extend(pcm)
+        while len(self.packet_buffer) >= 1600:  # 50 ms, mono 16 kHz PCM16
+            self.session.audio.append(bytes(self.packet_buffer[:1600]))
+            del self.packet_buffer[:1600]
 
     async def speak_phrases(self):
         while True:
             text, queued = await self.phrases.get()
-            if time.monotonic() - queued > 15:
-                raise ProviderError("Translation is over 15 seconds behind. Restart to resynchronize.")
-            for chunk in speech_chunks(text):
-                self.session.message = "Speaking Telugu"
-                before = self.speech_count
+            # Submit stable text immediately. Audio itself streams in 50 ms packets.
+            while not self.phrases.empty():
+                following, _ = self.phrases.get_nowait()
+                text += ' ' + following
+                if len(text.encode('utf-8')) >= 512: break
+            for chunk in speech_chunks(text, limit=512):
+                self.session.message = 'Listening - preparing Telugu audio'
+                self.streaming_started = True
+                self.completion.begin()
                 submitted = time.monotonic()
+                self.log.info('latency session=%s stage=caption_queue_wait ms=%.0f bytes=%d',
+                    self.session.id[:8], (submitted-queued)*1000, len(chunk.encode('utf-8')))
                 self.awaiting_audio_since = submitted
-                self.log.info("latency session=%s stage=caption_to_submit ms=%.0f bytes=%d", self.session.id[:8],
-                              (submitted - queued) * 1000, len(chunk.encode("utf-8")))
                 await self.services.speak(chunk)
-                self.log.info("latency session=%s stage=speak_request ms=%.0f", self.session.id[:8],
-                              (time.monotonic() - submitted) * 1000)
-                # One in-flight broadcast: confirm voice arrives, then wait for its tail.
-                # SDK audio frames are measured only for the agent UID, never source audio.
-                deadline = time.monotonic() + 25
-                while self.speech_count == before:
-                    if time.monotonic() > deadline:
-                        raise ProviderError("No Telugu voice returned. Check Murf voice access and Agora agent status.")
-                    await asyncio.sleep(0.02)
-                deadline = time.monotonic() + 60
-                # APPEND preserves ordering if this short quiet interval is an internal pause.
-                # Keep a single submitted chunk at a time; do not flood the provider queue.
-                while time.monotonic() - self.last_speech < 0.15:
-                    if time.monotonic() > deadline:
-                        raise ProviderError("Voice playback did not finish. Restart the session.")
-                    await asyncio.sleep(0.02)
-            self.session.phrases += 1
-            self.session.message = "Listening to English"
+                # Completion only orders TTS requests; it never gates audio delivery.
+                await self.completion.wait()
+                if self.packet_buffer:
+                    self.session.audio.append(bytes(self.packet_buffer))
+                    self.packet_buffer.clear()
+                self.session.phrases += 1
+                self.log.info('speech_streamed session=%s last_packet=%d generation_ms=%.0f',
+                    self.session.id[:8], self.session.audio.next_sequence-1,
+                    (time.monotonic()-submitted)*1000)
+            self.session.message = 'Listening - Telugu audio plays in order'
 
     async def monitor(self):
         while True:
             await asyncio.sleep(1)
             now = time.monotonic()
             if now - self.session.created > self.settings.max_seconds:
-                raise ProviderError("Session time limit reached. Start a new session to continue.")
+                raise ProviderError("Session time limit reached.")
             if now - self.session.touched > 25:
                 raise ProviderError("Phone disconnected. Session ended.")
 
     async def run(self):
         try:
             await self.rtc.open(self.receive_caption, self.receive_speech, self.fail)
+            await self.completion.open()
             await self.services.open()
             self.session.touched = time.monotonic()
             self.session.state, self.session.message = "ready", "Listening to English"
@@ -176,10 +193,16 @@ class Pipeline:
                 self.session.message = "Cloud cleanup was not confirmed. Check active agents in Agora Console."
             finally:
                 try:
-                    await self.rtc.close()
+                    try:
+                        await self.completion.close()
+                    finally:
+                        await self.rtc.close()
                 except Exception:
                     self.session.state = "error"
-                    self.session.message = "Control connection cleanup failed. Restart the backend before another session."
+                    self.session.message = "Control connection cleanup failed."
                 if self.session.state != "error":
                     self.session.state, self.session.message = "stopped", "Session stopped"
+                # Completed clips survive a provider error so the phone can finish its queue.
+                if self.session.state != "error" or self.session.audio.next_sequence == 1:
+                    self.session.audio.close()
                 self.session.ready.set()
