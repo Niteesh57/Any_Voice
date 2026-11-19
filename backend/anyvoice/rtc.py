@@ -26,6 +26,7 @@ class AgoraTransport:
         self.observer = self.audio_observer = self.local_observer = None
         self.connected = asyncio.Event()
         self.on_pcm = None
+        self.on_input_pcm = None
 
     async def open(self, on_caption, on_speech, on_error):
         from agora.rtc.agora_service import AgoraService
@@ -53,6 +54,8 @@ class AgoraTransport:
 
         class AudioObserver(IAudioFrameObserver):
             def on_playback_audio_frame_before_mixing(self, local, channel, uid, frame, vad_state, vad_audio):
+                if str(uid) == str(session.source_uid) and owner.on_input_pcm:
+                    loop.call_soon_threadsafe(owner.on_input_pcm, bytes(frame.buffer))
                 if str(uid) == str(session.worker_uid):
                     pcm = bytes(frame.buffer)
                     if owner.on_pcm:
@@ -83,6 +86,8 @@ class AgoraTransport:
         check(self.connection.connect(self.token, session.channel, str(session.control_uid)), "connect")
         await asyncio.wait_for(ready.wait(), timeout=20)
         check(self.connection.get_local_user().subscribe_audio(str(session.worker_uid)), "subscribe to voice agent")
+        if self.on_input_pcm:
+            check(self.connection.get_local_user().subscribe_audio(str(session.source_uid)), "subscribe to microphone source")
 
     async def close(self):
         if self.connection:

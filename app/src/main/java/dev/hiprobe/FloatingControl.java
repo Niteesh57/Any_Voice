@@ -12,26 +12,32 @@ import android.widget.*;
 final class FloatingControl {
     private final Context context;
     private final Runnable stop;
+    private final boolean bubble;
+    private Runnable ask;
+    private TextView askButton;
+    private long lastWake;
     private final WindowManager windows;
     private WindowManager.LayoutParams layout;
     private LinearLayout panel,details;
     private TextView state,caption;
     private BrandView logo;
-    private boolean expanded;
+    private boolean expanded,autoExpanded;
     private ValueAnimator snap;
-    FloatingControl(Context context,Runnable stop){this.context=context;this.stop=stop;windows=context.getSystemService(WindowManager.class);}
+    FloatingControl(Context context,Runnable stop){this(context,stop,false);}
+    FloatingControl(Context context,Runnable stop,boolean bubble){this.context=context;this.stop=stop;this.bubble=bubble;this.lastWake=BubbleState.wakeCount;windows=context.getSystemService(WindowManager.class);}
+    FloatingControl(Context context,Runnable stop,boolean bubble,Runnable ask){this(context,stop,bubble);this.ask=ask;}
     void show(){
         if(!Settings.canDrawOverlays(context))return;
         panel=new LinearLayout(context);panel.setOrientation(LinearLayout.VERTICAL);panel.setBackground(shape(0xff184d3e,26));panel.setClipToOutline(true);
         logo=new BrandView(context,false,0xffe5f2d2);logo.setPadding(dp(11),dp(11),dp(11),dp(11));logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);logo.setContentDescription("Any Voice floating controls. Tap to open; drag to move.");logo.setFocusable(true);panel.addView(logo,new LinearLayout.LayoutParams(dp(52),dp(52)));
         details=new LinearLayout(context);details.setOrientation(LinearLayout.VERTICAL);details.setPadding(dp(18),0,dp(18),dp(16));details.setVisibility(View.GONE);panel.addView(details);
-        text(details,"any voice",19,0xfff6f5ef);state=text(details,"Listening",12,0xffd9edb5);caption=text(details,"",13,0xffd4e1d7);caption.setMaxLines(3);caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        details.addView(new VoiceVolumeView(context,0xffd9edb5,null));
+        text(details,bubble?"bubble":"any voice",19,0xfff6f5ef);state=text(details,"Listening",12,0xffd9edb5);caption=text(details,"",13,0xffd4e1d7);caption.setMaxLines(3);caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if(bubble){askButton=text(details,"Ask Bubble",15,0xffd9edb5);askButton.setMinHeight(dp(48));askButton.setGravity(Gravity.CENTER);askButton.setBackground(shape(0xff295f4d,14));askButton.setContentDescription("Ask Bubble. Tap to start or end a conversation.");askButton.setOnClickListener(v->{if(ask!=null)ask.run();});}
         TextView open=text(details,"Open app  ↗",13,Color.WHITE);open.setMinHeight(dp(44));open.setGravity(Gravity.CENTER_VERTICAL);open.setOnClickListener(v->{context.startActivity(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));collapse();});
-        TextView end=text(details,"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
+        TextView end=text(details,bubble?"Disable Bubble":"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
         layout=new WindowManager.LayoutParams(dp(52),dp(52),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
         layout.gravity=Gravity.TOP|Gravity.START;layout.alpha=.78f;layout.x=width()-dp(64);layout.y=dp(170);
-        logo.setOnClickListener(v->{expanded=!expanded;applySize();});
+        logo.setOnClickListener(v->{autoExpanded=false;expanded=!expanded;applySize();});
         logo.setOnTouchListener(new View.OnTouchListener(){float x,y;int sx,sy;boolean moved;
             @Override public boolean onTouch(View view,MotionEvent event){
                 switch(event.getActionMasked()){
@@ -56,9 +62,12 @@ final class FloatingControl {
         update();updateLayout();if(expanded&&ValueAnimator.areAnimatorsEnabled()){details.setAlpha(0);details.animate().alpha(1).setDuration(160).start();}
     }
     void update(){
-        if(panel==null)return;logo.active(ListeningState.running);
-        if(expanded){UserProfile profile=new UserProfile(context);state.setText(ListeningState.replacing?"Translating · "+profile.languageName():ListeningState.detectedLanguage.isEmpty()?"Finding the language":"Original voice · "+profile.languageName());String value=ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Your audio, in your language.":value);}
+        if(panel==null)return;logo.active(bubble?BubbleState.active:ListeningState.running);
+        if(bubble){
+            if(expanded){if(askButton!=null)askButton.setText(BubbleState.active?"End conversation":"Ask Bubble");state.setText(BubbleState.message);String value=BubbleState.reply.isEmpty()?BubbleState.heard:BubbleState.reply;caption.setText(value.isEmpty()?"Tap Ask Bubble, speak, then pause for an answer.":value);}
+        }else if(expanded){UserProfile profile=new UserProfile(context);state.setText(ListeningState.replacing?"Translating · "+profile.languageName():ListeningState.detectedLanguage.isEmpty()?"Finding the language":"Original voice · "+profile.languageName());String value=ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Your audio, in your language.":value);}
     }
+
     void reposition(){if(panel!=null)applySize();}
     private void snapToEdge(){
         int target=layout.x+dp(26)<width()/2?dp(4):width()-dp(56);

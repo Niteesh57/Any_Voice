@@ -46,6 +46,12 @@ final class BackendClient {
     JSONObject start() throws Exception {
         return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
     }
+    JSONObject startBubble() throws Exception {
+        String context=ListeningState.sourceText+"\n"+ListeningState.translatedText+"\nPrevious Bubble reply: "+BubbleState.reply;
+        if(context.length()>8000)context=context.substring(context.length()-8000);
+        return request("POST", "/v1/sessions",new JSONObject().put("mode","bubble").put("source_language","auto")
+            .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context));
+    }
     JSONObject voices() throws Exception { return request("GET", "/v1/voices", null); }
     byte[] preview(String voice, String language) throws Exception {
         validate(base);

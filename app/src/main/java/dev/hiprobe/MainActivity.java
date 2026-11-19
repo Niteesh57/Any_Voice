@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private UserProfile profile;
     private OutputVolume voiceVolume;
     private LinearLayout body;
-    private TextView stateLabel,source,translated,startLabel,voiceSummary,languageTitle;
+    private TextView stateLabel,source,translated,startLabel,voiceSummary,languageTitle,bubbleToggle,bubbleStatus;
     private BrandView wave;
     private boolean checking,resumed;
     private JSONObject catalog;
@@ -44,14 +44,15 @@ public final class MainActivity extends Activity {
     private final Runnable refresh=new Runnable(){public void run(){
         if(startLabel!=null){
             boolean running=ListeningState.running;
-            startLabel.setText(running?"Stop listening":checking?"Connecting…":"Start listening");
+            updateText(startLabel,running?"Stop listening":checking?"Connecting…":"Start listening");
             startLabel.setEnabled(!checking&&!LiveTranslation.isStopping());
             startLabel.setContentDescription(startLabel.getText());
-            stateLabel.setText(running?friendlyStatus():checking?"Checking your connection":idleStatus());
+            updateText(stateLabel,running?friendlyStatus():checking?"Checking your connection":idleStatus());
             wave.active(running);
-            source.setText(ListeningState.sourceText.isEmpty()?"Your original speech appears here.":ListeningState.sourceText);
-            translated.setText(ListeningState.translatedText.isEmpty()?"Your translation appears here.":ListeningState.translatedText);
+            updateText(source,ListeningState.sourceText.isEmpty()?"Your original speech appears here.":ListeningState.sourceText);
+            updateText(translated,ListeningState.translatedText.isEmpty()?"Your translation appears here.":ListeningState.translatedText);
         }
+        if(bubbleToggle!=null){updateText(bubbleToggle,BubbleState.enabled?"Disable Bubble":"Enable Bubble");updateText(bubbleStatus,BubbleState.message);}
         handler.postDelayed(this,350);
     }};
     @Override public void onCreate(Bundle saved){
@@ -126,13 +127,22 @@ public final class MainActivity extends Activity {
         LinearLayout fi=column();LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(0,-2,1);fp.setMargins(dp(15),0,0,0);fr.addView(fi,fp);
         label(fi,"Always within reach",15,INK,600);label(fi,Settings.canDrawOverlays(this)?"Drag the bubble. Tap for controls.":"Enable your floating shortcut",12,MUTED,400);
         label(fr,"↗",23,GREEN,400);floating.setOnClickListener(v->{if(!Settings.canDrawOverlays(this))startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));else toast("Your floating bubble appears when listening starts.");});
+        space(root,14);
+        LinearLayout bubbleCard=card(root);
+        label(bubbleCard,"Meet Bubble",21,INK,700);
+        label(bubbleCard,"Enable Bubble, open the floating controls, then tap Ask Bubble. Pause briefly for an answer.",13,MUTED,400);
+        bubbleStatus=label(bubbleCard,BubbleState.message,12,GREEN,600);
+        bubbleToggle=action(bubbleCard,BubbleState.enabled?"Disable Bubble":"Enable Bubble",GREEN,Color.WHITE,v->{
+            if(BubbleState.enabled)startService(new Intent(this,BubbleService.class).setAction(BubbleService.DISABLE));else enableBubble();
+        });
+        label(bubbleCard,"Microphone starts only after Ask Bubble. It stops on lock or during translation. Replies use your selected language.",11,MUTED,400);
         space(root,20);
         LinearLayout captions=column();root.addView(captions);TextView transcriptToggle=label(captions,"Live transcript   ⌄",13,GREEN,600);
         LinearLayout transcript=card(captions);transcript.setVisibility(View.GONE);
         label(transcript,"ORIGINAL",10,MUTED,700);source=label(transcript,"Your original speech appears here.",14,INK,400);
         label(transcript,profile.languageName().toUpperCase(Locale.ROOT),10,GREEN,700);translated=label(transcript,"Your translation appears here.",16,INK,500);
         transcriptToggle.setOnClickListener(v->{boolean hidden=transcript.getVisibility()==View.GONE;transcript.setVisibility(hidden?View.VISIBLE:View.GONE);transcriptToggle.setText(hidden?"Live transcript   ⌃":"Live transcript   ⌄");if(hidden)enter(transcript);});
-        label(root,"Already in your language? Hear the original voice.\nNo microphone. Just the audio you choose to play.",12,MUTED,400);space(root,24);hackathon(root);enter(root);
+        label(root,"Already in your language? Hear the original voice.\nMedia translation uses app audio. Bubble uses your microphone only when enabled.",12,MUTED,400);space(root,24);hackathon(root);enter(root);
     }
     private void hackathon(LinearLayout parent){
         View line=new View(this);line.setBackgroundColor(LINE);parent.addView(line,new LinearLayout.LayoutParams(-1,dp(1)));space(parent,16);
@@ -157,6 +167,7 @@ public final class MainActivity extends Activity {
         }
     }
     private void openVoices(){
+        if(BubbleState.enabled){toast("Disable Bubble to change or preview voices.");return;}
         if(ListeningState.running){toast("Stop listening to change your language or voice.");return;}
         if(!new BackendClient(this).configured()){connectionSettings();return;}
 
@@ -222,11 +233,31 @@ public final class MainActivity extends Activity {
     private void preflight(){
         if(profile.voice().isEmpty()||profile.language().isEmpty()){openVoices();return;}
         BackendClient client=new BackendClient(this);if(!client.configured()){connectionSettings();return;}checking=true;
-        network.execute(()->{try{JSONObject result=client.capabilities();if(!result.optBoolean("configured"))throw new IllegalStateException("Demo backend isn’t ready. Check the connection settings.");handler.post(()->{checking=false;if(resumed&&!isFinishing())requestStart();});}
+        network.execute(()->{try{JSONObject result=client.capabilities();if(!result.optBoolean("configured"))throw new IllegalStateException("Demo backend isn’t ready. Check the connection settings.");handler.post(()->{checking=false;if(resumed&&!isFinishing())prepareTranslation();});}
             catch(Exception e){handler.post(()->{checking=false;toast(e.getMessage());});}});
     }
+    private void enableBubble(){
+        if(profile.voice().isEmpty()||profile.language().isEmpty()){openVoices();return;}
+        if(!new BackendClient(this).configured()){connectionSettings();return;}
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},30);return;}
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},31);return;}
+        network.execute(()->{try{JSONObject caps=new BackendClient(this).capabilities();if(!caps.optBoolean("bubble_configured"))throw new IllegalStateException("Configure Bubble's Qwen key on the backend first.");
+            handler.post(()->{if(resumed&&!isFinishing())startForegroundService(new Intent(this,BubbleService.class).setAction(BubbleService.ENABLE));});}
+            catch(Exception e){handler.post(()->toast(e.getMessage()));}});
+    }
+    private void prepareTranslation(){
+        BubbleState.translationPending=true;
+        if(BubbleState.enabled)startService(new Intent(this,BubbleService.class).setAction(BubbleService.PAUSE));
+        long deadline=SystemClock.elapsedRealtime()+15000;
+        handler.post(new Runnable(){public void run(){
+            if(isFinishing()||isDestroyed()){BubbleState.translationPending=false;return;}
+            if(!BubbleState.active&&!LiveTranslation.isStopping()){requestStart();return;}
+            if(SystemClock.elapsedRealtime()>deadline){BubbleState.translationPending=false;toast("Bubble is still stopping. Try Start listening again.");return;}
+            handler.postDelayed(this,100);
+        }});
+    }
     private void connectionSettings(){
-        if(ListeningState.running){toast("Stop listening before changing the connection.");return;}
+        if(ListeningState.running||BubbleState.enabled){toast("Stop listening and disable Bubble before changing the connection.");return;}
         BackendClient saved=new BackendClient(this);LinearLayout fields=column();fields.setPadding(dp(24),dp(12),dp(24),dp(16));label(fields,"Demo connection",23,INK,700);
         EditText url=field(fields,"Backend address",saved.url(),false),token=field(fields,"App access token",saved.access(),true);
         label(fields,"Voice engine",12,MUTED,600);Spinner mode=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Fast streaming · Agora + Murf","Agora Conversational AI Engine"});mode.setAdapter(adapter);mode.setSelection(saved.voiceProvider().equals("agora-engine")?1:0);fields.addView(mode);
@@ -239,12 +270,19 @@ public final class MainActivity extends Activity {
         requestCapture();
     }
     private void requestCapture(){startActivityForResult(getSystemService(MediaProjectionManager.class).createScreenCaptureIntent(),20);}
-    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==10&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)requestStart();else if(request==11)requestCapture();else toast("Allow audio capture to start listening.");}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=20)return;if(result!=RESULT_OK||data==null)return;startForegroundService(new Intent(this,ListeningService.class).setAction(ListeningService.START).putExtra("result",result).putExtra("projection",data));}
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==30){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)enableBubble();else toast("Microphone permission is needed for Bubble.");return;}
+        if(request==31){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)enableBubble();else toast("Enable notifications before enabling Bubble.");return;}
+        if(request==10&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)requestStart();
+        else if(request==11)requestCapture();else{BubbleState.translationPending=false;toast("Allow audio capture to start listening.");}
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=20)return;if(result!=RESULT_OK||data==null){BubbleState.translationPending=false;return;}startForegroundService(new Intent(this,ListeningService.class).setAction(ListeningService.START).putExtra("result",result).putExtra("projection",data));}
     private void command(String action){startService(new Intent(this,ListeningService.class).setAction(action));}
     @Override protected void onResume(){super.onResume();resumed=true;handler.removeCallbacks(refresh);handler.post(refresh);}
     @Override protected void onPause(){resumed=false;stopPreview();handler.removeCallbacks(refresh);super.onPause();}
     @Override protected void onDestroy(){stopPreview();if(picker!=null)picker.dismiss();network.shutdownNow();super.onDestroy();}
+    private void updateText(TextView view,String value){if(!android.text.TextUtils.equals(view.getText(),value))view.setText(value);}
     private void toast(String value){if(!isFinishing()&&!isDestroyed())Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private LinearLayout column(){LinearLayout view=new LinearLayout(this);view.setOrientation(LinearLayout.VERTICAL);return view;}

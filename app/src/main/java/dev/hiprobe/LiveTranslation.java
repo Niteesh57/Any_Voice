@@ -16,8 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class LiveTranslation {
     private static volatile boolean stopping;
     static boolean isStopping() { return stopping; }
-    interface Listener { void ready(); void routing(boolean translated); void failed(String message); }
+    interface Listener { void ready(); void routing(boolean translated); void failed(String message); default void status(JSONObject data) {} }
     private final Context context;
+    private final boolean bubble;
     private final BackendClient backend;
     private final OutputVolume voiceVolume;
     private final Listener listener;
@@ -52,19 +53,22 @@ final class LiveTranslation {
     }
 
 
-    LiveTranslation(Context context, Listener listener) {
-        this.context = context.getApplicationContext(); this.listener = listener; backend = new BackendClient(context); voiceVolume = new OutputVolume(context);
+    LiveTranslation(Context context, Listener listener) { this(context,listener,false); }
+    LiveTranslation(Context context, Listener listener, boolean bubble) {
+        this.context=context.getApplicationContext();this.listener=listener;this.bubble=bubble;
+        backend=new BackendClient(context);voiceVolume=new OutputVolume(context);
     }
     void start() {
         network.execute(() -> {
             try {
-                JSONObject data = backend.start();
+                JSONObject data = bubble ? backend.startBubble() : backend.start();
                 sessionId = data.getString("id");
                 if (!"queued-pcm".equals(data.optString("playback_mode")))
                     throw new IllegalStateException("Backend needs the queued-audio update");
                 if (data.optInt("audio_protocol") != 3)
                     throw new IllegalStateException("Backend needs the automatic-language update");
                 if (closed.get()) { stopRemote(); return; }
+                if(bubble)policy=new Policy(data.getInt("route_epoch"),true);
                 workerUid = data.getInt("worker_uid");
                 initialize(data);
                 network.scheduleWithFixedDelay(this::poll, 0, 250, TimeUnit.MILLISECONDS);
@@ -134,11 +138,14 @@ final class LiveTranslation {
                 terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
                 terminalMessage = status.optString("message", "Session ended");
             }
-            ListeningState.sourceText = status.optString("source_text");
-            ListeningState.translatedText = status.optString("translated_text");
-            ListeningState.phrases = status.optInt("phrases");
-            ListeningState.detectedLanguage = status.optString("detected_language");
-            ListeningState.message = status.optString("message", "Detecting language");
+            if(bubble)listener.status(status);
+            else {
+                ListeningState.sourceText=status.optString("source_text");
+                ListeningState.translatedText=status.optString("translated_text");
+                ListeningState.phrases=status.optInt("phrases");
+                ListeningState.detectedLanguage=status.optString("detected_language");
+                ListeningState.message=status.optString("message","Detecting language");
+            }
             if (playedSequence > acknowledgedSequence) {
                 int completed = playedSequence;
                 try { backend.audioPlayed(sessionId, completed); acknowledgedSequence = completed; }
@@ -218,7 +225,7 @@ final class LiveTranslation {
                     // Only a confirmed language change cancels obsolete translated audio.
                     output.pause(); output.flush();
                     if (!ends.isEmpty()) playedSequence = (int)ends.peekLast()[0];
-                    ends.clear(); framesWritten = 0; first = true; ListeningState.playingChunk = 0;
+                    ends.clear(); framesWritten = 0; first = true; if(!bubble)ListeningState.playingChunk = 0;
                     listener.routing(wanted.translated); // Applies media volume on the service thread before playback.
                     if (closed.get()) return;
                     output.play(); applied = wanted;
@@ -226,7 +233,7 @@ final class LiveTranslation {
                 long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
                 while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
                     long[] done = ends.removeFirst();
-                    playedSequence = (int)done[0]; ListeningState.playingChunk = (int)done[2];
+                    playedSequence = (int)done[0]; if(!bubble)ListeningState.playingChunk = (int)done[2];
                 }
                 if (clip == null) clip = prepared.poll(50, TimeUnit.MILLISECONDS);
                 if (clip == null) {
@@ -284,6 +291,7 @@ final class LiveTranslation {
             }
             stopRemote();
             network.shutdown();
+            if(bubble)try{network.awaitTermination(90,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
             } finally { stopping = false; }
         }, "TranslationCleanup").start();
     }

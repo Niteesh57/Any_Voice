@@ -152,7 +152,7 @@ public final class ListeningService extends Service {
         failure = message; cleanup(); stopSelf();
     }
     private void cleanup() {
-        capturing = false; ListeningState.running = false; ListeningState.replacing = false;
+        capturing = false; ListeningState.running = false; BubbleState.translationPending=false; ListeningState.replacing = false;
         if (translation != null) { translation.close(); translation = null; }
         main.removeCallbacksAndMessages(null);
         if (recorder != null) {

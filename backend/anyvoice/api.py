@@ -6,7 +6,7 @@ import time
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
 
 from .config import Settings
@@ -14,18 +14,22 @@ from .voices import VoiceCatalog, agora_locale
 from .providers import ProviderError
 from .rtc import native_available
 from .session import Pipeline, Session, token_for
+from .bubble import BubblePipeline
+from .qwen_audio import QwenAudio
 
 load_dotenv()
 
 
 class StartRequest(BaseModel):
+    mode: Literal["translation", "bubble"] = "translation"
+    context: str = Field(default="", max_length=8000)
     source_language: str = "auto"
     target_language: str = "te-IN"
     voice_id: str | None = None
     voice_provider: Literal["murf-direct", "agora-engine"] | None = None
 
 
-def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available):
+def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available, bubble_factory=BubblePipeline):
     settings = settings or Settings.from_env()
     sessions = {}
     catalog = VoiceCatalog(settings)
@@ -46,11 +50,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.12", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.14", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.12"}
+        return {"service": "Any Voice", "version": "0.14"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -66,6 +70,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         missing = settings.missing()
         native = native_check()
         return {"configured": not missing and native, "missing": missing,
+                "bubble_configured": bool(settings.dashscope_key and settings.bubble_llm_url and settings.bubble_llm_model),
                 "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_selection": "voice-library",
                 "message": "Ready" if not missing and native else "Configure provider credentials and run the Linux worker"}
 
@@ -88,8 +93,19 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             except (ProviderError,asyncio.TimeoutError) as exc: raise HTTPException(502,"Voice preview unavailable. Try again.") from exc
             return Response(audio,media_type="audio/wav",headers={"Cache-Control":"private, max-age=600"})
 
+    @app.get("/v1/bubble/diagnostics", dependencies=[Depends(auth)])
+    async def bubble_diagnostics():
+        session=next((s for s in sessions.values() if s.mode=="bubble" and s.task and not s.task.done()),None)
+        if not session:return {"active":False}
+        return {"active":True,"state":session.state,"phase":session.bubble_state,"wake_sequence":session.wake_sequence,
+            "input_frames":session.input_frames,"input_rms":session.input_rms,"max_input_rms":session.max_input_rms,
+            "voice_frames":session.audio_frames,"last_audio_sequence":session.audio.next_sequence-1 if session.audio else 0,
+            "acknowledged":session.audio.acknowledged if session.audio else 0,"phrases":session.phrases}
+
     @app.post("/v1/sessions", dependencies=[Depends(auth)])
     async def start(request: StartRequest):
+        if request.mode == "bubble" and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
+            raise HTTPException(503,"Configure Bubble Qwen credentials on the backend")
         if request.source_language not in ("auto", "en-IN") or not agora_locale(request.target_language):
             raise HTTPException(422, "Select a supported output language")
         try:
@@ -111,13 +127,15 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                     del sessions[sid]
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
-            session = Session(voice_provider=request.voice_provider or settings.voice_provider,
+            session = Session(mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
                 target_language=agora_locale(request.target_language), voice_locale=request.target_language, voice_id=request.voice_id,
                 source_language=request.source_language,
                 source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else ("en-IN",))
+            if request.mode == "bubble":
+                session.source_languages=("en-IN",)  # English wake phrase; Qwen understands command audio directly.
             sessions[session.id] = session
             try:
-                pipeline = pipeline_factory(settings, session)
+                pipeline = (bubble_factory if request.mode == "bubble" else pipeline_factory)(settings, session)
                 session.task = asyncio.create_task(pipeline.run())
                 await asyncio.wait_for(session.ready.wait(), timeout=75)
                 if session.state != "ready":

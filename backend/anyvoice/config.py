@@ -17,12 +17,18 @@ class Settings:
     voice_rate: int = 15
     voice_provider: str = "murf-direct"
     auto_languages: tuple = ("en-IN", "hi-IN", "ta-IN", "te-IN")
+    dashscope_key: str = ""
+    bubble_llm_url: str = ""
+    bubble_llm_model: str = ""
     max_seconds: int = 900
 
     @classmethod
     def from_env(cls):
         return cls(
             auto_languages=tuple(x.strip() for x in os.getenv("AUTO_SOURCE_LANGUAGES", "en-IN,hi-IN,ta-IN,te-IN").split(",") if x.strip()),
+            dashscope_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            bubble_llm_url=os.getenv("BUBBLE_LLM_URL", ""),
+            bubble_llm_model=os.getenv("BUBBLE_LLM_MODEL", ""),
             access_token=os.getenv("ANYVOICE_ACCESS_TOKEN", ""),
             agora_app_id=os.getenv("AGORA_APP_ID", ""),
             agora_certificate=os.getenv("AGORA_APP_CERTIFICATE", ""),

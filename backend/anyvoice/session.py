@@ -42,9 +42,18 @@ class Session:
     detected_language: str = ""
     route_mode: str = "detecting"
     route_epoch: int = 0
+    mode: str = "translation"
+    bubble_state: str = "standby"
+    wake_sequence: int = 0
+    context: str = ""
+    input_frames: int = 0
+    input_rms: int = 0
+    max_input_rms: int = 0
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
+                "mode": self.mode, "bubble_state": self.bubble_state, "wake_sequence": self.wake_sequence,
+                "input_allowed": self.mode == "bubble" and self.bubble_state in ("standby", "listening"),
                 "source_text": self.source, "translated_text": self.translated,
                 "phrases": self.phrases, "audio_frames": self.audio_frames,
                 "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
@@ -263,7 +272,7 @@ class Pipeline:
                 await self.completion.open()
                 await self.services.open()
             self.session.touched = time.monotonic()
-            self.session.state, self.session.message = "ready", "Detecting language - original audio" if self.session.source_language == "auto" else "Listening to English"
+            self.session.state, self.session.message = "ready", "Bubble is listening. Ask a question." if self.session.mode == "bubble" else "Detecting language - original audio" if self.session.source_language == "auto" else "Listening to English"
             self.session.ready.set()
             self.work = [asyncio.create_task(coro) for coro in (
                 self.speak_phrases(), self.monitor(), self.session.stopped.wait(),
