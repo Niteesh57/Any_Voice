@@ -129,7 +129,8 @@ public final class ListeningService extends Service {
         @Override public void run() {
             if (!capturing) return;
             if (ListeningState.replacing && !volume.isMuted()) {
-                finish("Volume changed. Original audio restored."); return;
+                try { volume.mute(); }
+                catch (RuntimeException e) { finish("Could not keep original audio muted: " + e.getMessage()); return; }
             }
             if (floating != null) floating.update();
             main.postDelayed(this,350);

@@ -26,6 +26,7 @@ final class FloatingControl {
         logo=new BrandView(context,false,0xffe5f2d2);logo.setPadding(dp(11),dp(11),dp(11),dp(11));logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);logo.setContentDescription("Any Voice floating controls. Tap to open; drag to move.");logo.setFocusable(true);panel.addView(logo,new LinearLayout.LayoutParams(dp(52),dp(52)));
         details=new LinearLayout(context);details.setOrientation(LinearLayout.VERTICAL);details.setPadding(dp(18),0,dp(18),dp(16));details.setVisibility(View.GONE);panel.addView(details);
         text(details,"any voice",19,0xfff6f5ef);state=text(details,"Listening",12,0xffd9edb5);caption=text(details,"",13,0xffd4e1d7);caption.setMaxLines(3);caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        details.addView(new VoiceVolumeView(context,0xffd9edb5,null));
         TextView open=text(details,"Open app  ↗",13,Color.WHITE);open.setMinHeight(dp(44));open.setGravity(Gravity.CENTER_VERTICAL);open.setOnClickListener(v->{context.startActivity(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));collapse();});
         TextView end=text(details,"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
         layout=new WindowManager.LayoutParams(dp(52),dp(52),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
@@ -51,7 +52,7 @@ final class FloatingControl {
     private void applySize(){
         if(panel==null)return;
         details.setVisibility(expanded?View.VISIBLE:View.GONE);layout.width=dp(expanded?264:52);layout.height=expanded?WindowManager.LayoutParams.WRAP_CONTENT:dp(52);layout.alpha=expanded?1f:.78f;
-        layout.x=clamp(layout.x,dp(4),Math.max(dp(4),width()-layout.width-dp(4)));layout.y=clamp(layout.y,dp(32),Math.max(dp(32),height()-dp(expanded?360:110)));
+        layout.x=clamp(layout.x,dp(4),Math.max(dp(4),width()-layout.width-dp(4)));layout.y=clamp(layout.y,dp(32),Math.max(dp(32),height()-dp(expanded?440:110)));
         update();updateLayout();if(expanded&&ValueAnimator.areAnimatorsEnabled()){details.setAlpha(0);details.animate().alpha(1).setDuration(160).start();}
     }
     void update(){

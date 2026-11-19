@@ -19,6 +19,7 @@ final class LiveTranslation {
     interface Listener { void ready(); void routing(boolean translated); void failed(String message); }
     private final Context context;
     private final BackendClient backend;
+    private final OutputVolume voiceVolume;
     private final Listener listener;
     private final ScheduledExecutorService network = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -52,7 +53,7 @@ final class LiveTranslation {
 
 
     LiveTranslation(Context context, Listener listener) {
-        this.context = context.getApplicationContext(); this.listener = listener; backend = new BackendClient(context);
+        this.context = context.getApplicationContext(); this.listener = listener; backend = new BackendClient(context); voiceVolume = new OutputVolume(context);
     }
     void start() {
         network.execute(() -> {
@@ -107,7 +108,7 @@ final class LiveTranslation {
             .setAudioFormat(new AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(Math.max(minimum, 3200)).setTransferMode(AudioTrack.MODE_STREAM).build();
-        output.setVolume(0.75f); output.play();
+        output.setVolume(voiceVolume.gain()); output.play();
         playback = new Thread(this::render, "VoicePlayback"); playback.start();
         downloading = new Thread(this::downloadAudio, "VoicePrefetch"); downloading.start();
         publishing = new Thread(this::publish, "SourceUpload"); publishing.start();
@@ -203,12 +204,15 @@ final class LiveTranslation {
     }
     private void render() {
         long framesWritten = 0;
+        float appliedGain = -1;
         java.util.ArrayDeque<long[]> ends = new java.util.ArrayDeque<>();
         Policy applied = policy;
         PreparedAudio clip = null;
         boolean first = true;
         try {
             while (!closed.get()) {
+                float gain = voiceVolume.gain();
+                if (gain != appliedGain) { output.setVolume(gain); appliedGain = gain; }
                 Policy wanted = policy;
                 if (wanted != applied) {
                     // Only a confirmed language change cancels obsolete translated audio.

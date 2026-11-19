@@ -30,6 +30,7 @@ public final class MainActivity extends Activity {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final ExecutorService network=Executors.newSingleThreadExecutor();
     private UserProfile profile;
+    private OutputVolume voiceVolume;
     private LinearLayout body;
     private TextView stateLabel,source,translated,startLabel,voiceSummary,languageTitle;
     private BrandView wave;
@@ -54,7 +55,7 @@ public final class MainActivity extends Activity {
         handler.postDelayed(this,350);
     }};
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);profile=new UserProfile(this);
+        super.onCreate(saved);profile=new UserProfile(this);voiceVolume=new OutputVolume(this);
         if(!ListeningState.running)try{new VolumeGuard(this).restore();}catch(RuntimeException ignored){}
         getWindow().setStatusBarColor(PAPER);getWindow().setNavigationBarColor(PAPER);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
@@ -113,7 +114,7 @@ public final class MainActivity extends Activity {
         startLabel=action(hero,"Start listening",PAPER,INK,v->{
             if(checking||LiveTranslation.isStopping())return;
             stopPreview();if(ListeningState.running)command(ListeningService.STOP);else preflight();
-        });space(root,18);
+        });space(hero,12);hero.addView(new VoiceVolumeView(this,LIME,this::applyPreviewVolume));space(root,18);
         LinearLayout voiceCard=card(root);LinearLayout vr=row();voiceCard.addView(vr);
         BrandView voiceIcon=new BrandView(this,false,GREEN);voiceIcon.setBackground(shape(0xffedf2e3,14));vr.addView(voiceIcon,new LinearLayout.LayoutParams(dp(45),dp(45)));
         LinearLayout voiceInfo=column();LinearLayout.LayoutParams vi=new LinearLayout.LayoutParams(0,-2,1);vi.setMargins(dp(13),0,0,0);vr.addView(voiceInfo,vi);
@@ -144,7 +145,7 @@ public final class MainActivity extends Activity {
         label(fields,"Make yourself at home.",23,INK,700);EditText name=field(fields,"Your name",profile.name(),false);name.setFilters(new InputFilter[]{new InputFilter.LengthFilter(30)});
         String[] gender={profile.gender()};genderControls(fields,gender);
         TextView connection=action(fields,"Demo connection",0xffedf2e3,GREEN,v->connectionSettings());connection.setEnabled(!ListeningState.running);
-        label(fields,"Any Voice · 0.12\nBuilt for Build with Agora — Bengaluru 2026\nPowered by Agora RTC and Murf Falcon",12,MUTED,400);
+        label(fields,"Any Voice · "+BuildConfig.VERSION_NAME+"\nBuilt for Build with Agora — Bengaluru 2026\nPowered by Agora RTC and Murf Falcon",12,MUTED,400);
         AlertDialog dialog=new AlertDialog.Builder(this).setView(fields).setNegativeButton("Close",null).setPositiveButton("Save",null).create();dialog.setOnShowListener(v->dialog.getButton(-1).setOnClickListener(w->{if(name.getText().toString().trim().isEmpty()){name.setError("Enter your name");return;}profile.identity(name.getText().toString(),gender[0]);dialog.dismiss();home();}));dialog.show();
     }
     private void genderControls(LinearLayout parent,String[] selected){
@@ -175,6 +176,7 @@ public final class MainActivity extends Activity {
         for(int i=0;i<languages.length();i++){JSONObject language=languages.optJSONObject(i);if(language==null)continue;if(language.optString("id").equals(profile.language()))chosen=names.size();String localeCode=language.optString("agora_locale",language.optString("id"));Locale local=Locale.forLanguageTag(localeCode);String nativeLabel=local.getDisplayLanguage(local);if(!nativeLabel.isEmpty())try{language.put("native",nativeLabel);}catch(JSONException ignored){}languageRows.add(language);names.add(nativeLabel+"  ·  "+language.optString("name"));}
         Spinner language=new Spinner(this);language.setPadding(dp(10),0,dp(8),0);language.setBackground(shape(Color.WHITE,14));language.setContentDescription("Choose listening language");ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);language.setAdapter(adapter);sheet.addView(language,new LinearLayout.LayoutParams(-1,dp(54)));language.setSelection(chosen);
         LinearLayout filter=row();sheet.addView(filter);String[] gender={"All"};ArrayList<TextView> filters=new ArrayList<>();
+        sheet.addView(new VoiceVolumeView(this,GREEN,this::applyPreviewVolume));
         TextView count=label(sheet,"Loading voices…",12,MUTED,400);
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);LinearLayout list=column();scroll.addView(list);sheet.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         TextView detected=label(sheet,"",11,MUTED,400);
@@ -198,7 +200,7 @@ public final class MainActivity extends Activity {
         };
         for(String value:new String[]{"All","Male","Female"}){TextView item=chip(value,value.equals(gender[0])?Color.WHITE:INK,value.equals(gender[0])?GREEN:0xffe9ede3);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(40),1);lp.setMargins(0,dp(6),dp(6),dp(6));filter.addView(item,lp);filters.add(item);item.setOnClickListener(v->{gender[0]=value;for(TextView option:filters){boolean checked=option.getText().toString().equals(value);option.setTextColor(checked?Color.WHITE:INK);option.setBackground(shape(checked?GREEN:0xffe9ede3,14));}render.run();});}
         language.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> parent,View view,int position,long id){render.run();}public void onNothingSelected(AdapterView<?> parent){}});
-        dialog.setContentView(sheet);dialog.setOnDismissListener(v->{stopPreview();if(picker==dialog)picker=null;});Window window=dialog.getWindow();if(window!=null){window.setBackgroundDrawableResource(android.R.color.transparent);window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(.32f);window.setGravity(Gravity.BOTTOM);window.setWindowAnimations(R.style.VoiceSheetAnimation);window.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.84));}
+        dialog.setOnKeyListener((d,key,event)->voiceVolume.key(event));dialog.setContentView(sheet);dialog.setOnDismissListener(v->{stopPreview();if(picker==dialog)picker=null;});Window window=dialog.getWindow();if(window!=null){window.setBackgroundDrawableResource(android.R.color.transparent);window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(.32f);window.setGravity(Gravity.BOTTOM);window.setWindowAnimations(R.style.VoiceSheetAnimation);window.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.84));}
         dialog.show();if(window!=null)window.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.84));render.run();
     }
     private void playPreview(String voice,String language,TextView button){
@@ -206,9 +208,15 @@ public final class MainActivity extends Activity {
         stopPreview();previewControl=button;int generation=previewGeneration;button.setText("…");button.setEnabled(false);
         network.execute(()->{try{byte[] audio=new BackendClient(this).preview(voice,language);handler.post(()->{
             if(generation!=previewGeneration||!resumed||isDestroyed()){button.setText("▶");button.setEnabled(true);return;}
-            try{previewFile=File.createTempFile("voice-preview-",".wav",getCacheDir());Files.write(previewFile.toPath(),audio);preview=new MediaPlayer();preview.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE).build());preview.setDataSource(previewFile.getAbsolutePath());preview.setOnPreparedListener(player->{if(generation==previewGeneration){button.setText("Ⅱ");player.start();}});preview.setOnCompletionListener(player->{if(generation==previewGeneration)stopPreview();});preview.setOnErrorListener((player,what,extra)->{if(generation==previewGeneration){stopPreview();toast("Preview could not play");}return true;});preview.prepareAsync();button.setEnabled(true);}
+            try{previewFile=File.createTempFile("voice-preview-",".wav",getCacheDir());Files.write(previewFile.toPath(),audio);preview=new MediaPlayer();preview.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE).build());preview.setDataSource(previewFile.getAbsolutePath());preview.setOnPreparedListener(player->{if(generation==previewGeneration){button.setText("Ⅱ");applyPreviewVolume();player.start();}});preview.setOnCompletionListener(player->{if(generation==previewGeneration)stopPreview();});preview.setOnErrorListener((player,what,extra)->{if(generation==previewGeneration){stopPreview();toast("Preview could not play");}return true;});preview.prepareAsync();button.setEnabled(true);}
             catch(Exception e){stopPreview();button.setText("▶");button.setEnabled(true);toast("Preview could not play");}
         });}catch(Exception e){handler.post(()->{button.setText("▶");button.setEnabled(true);if(generation==previewGeneration)toast("Preview unavailable. Please try again.");});}});
+    }
+    private void applyPreviewVolume(){
+        if(preview!=null)try{float gain=voiceVolume.gain();preview.setVolume(gain,gain);}catch(IllegalStateException ignored){}
+    }
+    @Override public boolean dispatchKeyEvent(KeyEvent event){
+        return voiceVolume!=null&&voiceVolume.key(event)||super.dispatchKeyEvent(event);
     }
     private void stopPreview(){previewGeneration++;if(previewControl!=null){previewControl.setText("▶");previewControl.setEnabled(true);previewControl=null;}if(preview!=null){preview.release();preview=null;}if(previewFile!=null){previewFile.delete();previewFile=null;}}
     private void preflight(){
