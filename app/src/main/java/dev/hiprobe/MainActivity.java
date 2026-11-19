@@ -39,7 +39,7 @@ public final class MainActivity extends Activity {
             translated.setText(ProbeState.translatedText.isEmpty() ? "తెలుగులో వినండి.\nYour Telugu translation will appear here." : ProbeState.translatedText);
             connection.setText(new BackendClient(MainActivity.this).configured() ? "Backend saved · English → Telugu" : "Connect your backend to begin");
             overlay.setText(Settings.canDrawOverlays(MainActivity.this) ? "Floating controls enabled ✓" : "Enable floating controls");
-            handler.postDelayed(this, 700);
+            handler.postDelayed(this, 250);
         }
     };
     @Override public void onCreate(Bundle state) {
