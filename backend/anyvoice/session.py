@@ -10,6 +10,7 @@ from .rtc import AgoraTransport
 from .completion import SpeechCompletion
 from .audio_queue import AudioQueue
 from .murf_stream import MurfStream
+from .parallel_voice import ParallelVoice
 
 
 @dataclass
@@ -41,6 +42,7 @@ class Session:
                 "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
                 "last_audio_sequence": self.audio.next_sequence - 1 if self.audio else 0,
                 "voice_provider": self.voice_provider,
+                "audio_protocol": 2,
                 "source_language": "en-IN", "target_language": "te-IN"}
 
 
@@ -62,7 +64,7 @@ def token_for(settings, session, uid):
 
 
 class Pipeline:
-    def __init__(self, settings, session, transport=None, services=None, completion=None, direct=None):
+    def __init__(self, settings, session, transport=None, services=None, completion=None, direct=None, direct_b=None):
         self.settings, self.session = settings, session
         session.voice_provider = session.voice_provider or settings.voice_provider
         token = lambda uid: token_for(settings, session, uid)
@@ -70,6 +72,7 @@ class Pipeline:
         self.services = services or AgoraServices(settings, session, token)
         self.completion = completion or SpeechCompletion(settings, session, token(session.control_uid))
         self.direct = direct or MurfStream(settings)
+        self.direct_b = direct_b or MurfStream(settings)
         self.phrases = asyncio.Queue()
         self.session.audio = AudioQueue()
         self.capture = None
@@ -83,6 +86,9 @@ class Pipeline:
         self.last_speech = 0
         self.awaiting_audio_since = None
         self.log = logging.getLogger("uvicorn.error")
+        self.parallel = None
+        self.engine_chunk = 0
+        self.engine_part = 0
 
     def fail(self, message):
         if not self.error.done():
@@ -121,10 +127,16 @@ class Pipeline:
         if not self.streaming_started or self.session.stopped.is_set(): return
         self.packet_buffer.extend(pcm)
         while len(self.packet_buffer) >= 1600:  # 50 ms, mono 16 kHz PCM16
-            self.session.audio.append(bytes(self.packet_buffer[:1600]))
+            self.engine_part += 1
+            self.session.audio.append(bytes(self.packet_buffer[:1600]),max(1,self.engine_chunk),self.engine_part)
             del self.packet_buffer[:1600]
 
     async def speak_phrases(self):
+        if self.session.voice_provider == 'murf-direct':
+            def generated(): self.session.phrases += 1
+            self.parallel = ParallelVoice([self.direct,self.direct_b],self.session.audio,self.fail,generated,self.log)
+            await self.parallel.run(self.phrases)
+            return
         while True:
             text, queued = await self.phrases.get()
             # Submit stable text immediately. Audio itself streams in 50 ms packets.
@@ -133,6 +145,8 @@ class Pipeline:
                 text += ' ' + following
                 if len(text.encode('utf-8')) >= 512: break
             for chunk in speech_chunks(text, limit=512):
+                self.engine_chunk += 1
+                self.engine_part = 0
                 self.session.message = 'Listening - preparing Telugu audio'
                 self.streaming_started = True
                 if self.session.voice_provider == 'agora-engine': self.completion.begin()
@@ -140,14 +154,12 @@ class Pipeline:
                 self.log.info('latency session=%s stage=caption_queue_wait ms=%.0f bytes=%d',
                     self.session.id[:8], (submitted-queued)*1000, len(chunk.encode('utf-8')))
                 self.awaiting_audio_since = submitted
-                if self.session.voice_provider == 'murf-direct':
-                    await self.direct.synthesize(chunk, self.receive_pcm, self.receive_speech)
-                else:
-                    await self.services.speak(chunk)
-                    # Engine route is retained for hackathon demo and A/B comparisons.
-                    await self.completion.wait()
+                await self.services.speak(chunk)
+                # Engine route is retained for hackathon demo and A/B comparisons.
+                await self.completion.wait()
                 if self.packet_buffer:
-                    self.session.audio.append(bytes(self.packet_buffer))
+                    self.engine_part += 1
+                    self.session.audio.append(bytes(self.packet_buffer),self.engine_chunk,self.engine_part)
                     self.packet_buffer.clear()
                 self.session.phrases += 1
                 self.log.info('speech_streamed session=%s last_packet=%d generation_ms=%.0f',
@@ -168,7 +180,7 @@ class Pipeline:
         try:
             await self.rtc.open(self.receive_caption, self.receive_speech, self.fail)
             if self.session.voice_provider == 'murf-direct':
-                await self.direct.open()
+                await asyncio.gather(self.direct.open(), self.direct_b.open())
                 await self.services.open_stt()
             else:
                 await self.completion.open()
@@ -209,7 +221,9 @@ class Pipeline:
                         await self.completion.close()
                     finally:
                         try: await self.direct.close()
-                        finally: await self.rtc.close()
+                        finally:
+                            try: await self.direct_b.close()
+                            finally: await self.rtc.close()
                 except Exception:
                     self.session.state = "error"
                     self.session.message = "Control connection cleanup failed."

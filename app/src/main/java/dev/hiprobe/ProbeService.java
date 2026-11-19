@@ -86,7 +86,7 @@ public final class ProbeService extends Service {
             ProbeState.frames = ProbeState.mutedSignalFrames = ProbeState.audibleSignalFrames = 0;
             ProbeState.db = -96;
             ProbeState.live = liveMode;
-            ProbeState.sourceText = ""; ProbeState.translatedText = ""; ProbeState.phrases = 0;
+            ProbeState.sourceText = ""; ProbeState.translatedText = ""; ProbeState.phrases = 0; ProbeState.playingChunk = 0;
             lastSignal = 0; failure = null; capturing = true; ProbeState.running = true;
             ProbeState.replacing = false;
             if (liveMode) {

@@ -39,8 +39,10 @@ final class LiveTranslation {
     private volatile java.net.HttpURLConnection audioConnection;
     private final ArrayBlockingQueue<PreparedAudio> prepared = new ArrayBlockingQueue<>(100);
     private static final class PreparedAudio {
-        final int sequence; final byte[] pcm;
-        PreparedAudio(int sequence, byte[] pcm) { this.sequence = sequence; this.pcm = pcm; }
+        final int sequence, chunk, part; final byte[] pcm;
+        PreparedAudio(int sequence, int chunk, int part, byte[] pcm) {
+            this.sequence = sequence; this.chunk = chunk; this.part = part; this.pcm = pcm;
+        }
     }
 
 
@@ -54,6 +56,8 @@ final class LiveTranslation {
                 sessionId = data.getString("id");
                 if (!"queued-pcm".equals(data.optString("playback_mode")))
                     throw new IllegalStateException("Backend needs the queued-audio update");
+                if (data.optInt("audio_protocol") != 2)
+                    throw new IllegalStateException("Backend needs the numbered-audio update");
                 if (closed.get()) { stopRemote(); return; }
                 workerUid = data.getInt("worker_uid");
                 initialize(data);
@@ -153,6 +157,7 @@ final class LiveTranslation {
     }
     private void downloadAudio() {
         int after = 0;
+        int lastChunk = 0, lastPart = 0;
         while (!closed.get()) {
             java.net.HttpURLConnection connection = null;
             try {
@@ -160,16 +165,22 @@ final class LiveTranslation {
                 connection = backend.audioStream(sessionId, after); audioConnection = connection;
                 try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(connection.getInputStream()))) {
                     while (!closed.get()) {
-                        int sequence = in.readInt(), size = in.readInt();
-                        if (sequence == 0 && size == 0) continue;
+                        int sequence = in.readInt(), chunk = in.readInt(), part = in.readInt(), size = in.readInt();
+                        if (sequence == 0 && chunk == 0 && part == 0 && size == 0) continue;
                         if (sequence != after + 1 || size < 2 || size > 3200 || size % 2 != 0)
-                            throw new java.io.IOException("Invalid audio packet");
+                            throw new IllegalStateException("Invalid numbered audio packet");
+                        boolean sameChunk = chunk == lastChunk && part == lastPart + 1;
+                        boolean nextChunk = chunk == lastChunk + 1 && part == 1;
+                        if ((!sameChunk && !nextChunk) || chunk < 1 || part < 1)
+                            throw new IllegalStateException("Telugu chunk numbering is out of order");
                         byte[] pcm = new byte[size]; in.readFully(pcm);
-                        prepared.put(new PreparedAudio(sequence, pcm));
+                        prepared.put(new PreparedAudio(sequence, chunk, part, pcm));
                         after = sequence; downloadedSequence = sequence;
+                        lastChunk = chunk; lastPart = part;
                     }
                 }
             } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            catch (IllegalStateException e) { if (!closed.get()) fail(e.getMessage()); return; }
             catch (Exception e) {
                 if (closed.get()) return;
                 try { Thread.sleep(100); } catch (InterruptedException interrupted) { return; }
@@ -186,8 +197,10 @@ final class LiveTranslation {
         try {
             while (!closed.get()) {
                 long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
-                while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed)
-                    playedSequence = (int)ends.removeFirst()[0];
+                while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
+                    long[] done = ends.removeFirst();
+                    playedSequence = (int)done[0]; ProbeState.playingChunk = (int)done[2];
+                }
                 PreparedAudio clip = prepared.poll(50, TimeUnit.MILLISECONDS);
                 if (clip == null) {
                     if (terminalMessage != null && downloadedSequence >= terminalSequence && ends.isEmpty()) { fail(terminalMessage); return; }
@@ -206,7 +219,7 @@ final class LiveTranslation {
                     if (written <= 0) throw new IllegalStateException("Translated audio playback stopped");
                     offset += written; framesWritten += written / 2;
                 }
-                ends.addLast(new long[]{clip.sequence, framesWritten});
+                ends.addLast(new long[]{clip.sequence, framesWritten, clip.chunk});
                 // No per-packet completion wait: queued samples never replace existing samples.
             }
         } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }

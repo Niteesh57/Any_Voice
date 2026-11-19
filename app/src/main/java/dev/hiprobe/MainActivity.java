@@ -35,6 +35,8 @@ public final class MainActivity extends Activity {
             setup.setEnabled(!running && !checking);
             check.setEnabled(!running && !checking);
             status.setText(running ? ProbeState.message : ProbeState.message.startsWith("Ready.") ? "Ready when you are" : ProbeState.message);
+            if (running && ProbeState.live && ProbeState.playingChunk > 0)
+                status.append(String.format(java.util.Locale.US, " · Playing chunk %03d", ProbeState.playingChunk));
             source.setText(ProbeState.sourceText.isEmpty() ? "Your English audio will appear here." : ProbeState.sourceText);
             translated.setText(ProbeState.translatedText.isEmpty() ? "తెలుగులో వినండి.\nYour Telugu translation will appear here." : ProbeState.translatedText);
             connection.setText(new BackendClient(MainActivity.this).configured() ? "Backend saved · English → Telugu" : "Connect your backend to begin");

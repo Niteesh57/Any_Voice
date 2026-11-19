@@ -51,7 +51,7 @@ final class BackendClient {
     }
     HttpURLConnection audioStream(String id, int after) throws Exception {
         validate(base);
-        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream?after=" + after).openConnection();
+        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream-v2?after=" + after).openConnection();
         c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(10000);
         c.setRequestProperty("Authorization", "Bearer " + access);
         if (c.getResponseCode() != 200) { c.disconnect(); throw new IOException("Audio stream unavailable"); }

@@ -65,8 +65,8 @@ class MurfStreamTests(unittest.IsolatedAsyncioTestCase):
    async def synthesize(self,text,on_pcm,on_speech):
     self.spoken.append(text);on_speech();on_pcm(b'\x10\x27'*8000)
    async def close(self):self.closed=True
-  services=Services();direct=Direct();rtc=Transport();session=Session()
-  pipeline=Pipeline(settings,session,transport=rtc,services=services,completion=FakeCompletion(),direct=direct)
+  services=Services();direct=Direct();direct_b=Direct();rtc=Transport();session=Session()
+  pipeline=Pipeline(settings,session,transport=rtc,services=services,completion=FakeCompletion(),direct=direct,direct_b=direct_b)
   task=asyncio.create_task(pipeline.run())
   try:
    await asyncio.wait_for(session.ready.wait(),1)
@@ -76,10 +76,10 @@ class MurfStreamTests(unittest.IsolatedAsyncioTestCase):
    await asyncio.sleep(.01)
    pipeline.receive_caption(json.dumps(caption('two',identity=2)).encode())
    await asyncio.sleep(.01)
-   self.assertEqual(direct.spoken,['one','two'])
+   self.assertEqual(sorted(direct.spoken+direct_b.spoken),['one','two'])
    self.assertEqual(sum(r['duration_ms'] for r in session.audio.clips.values()),1000)
    self.assertEqual(session.audio.acknowledged,0) # Both generated before any playback acknowledgement.
   finally:session.stopped.set();await asyncio.wait_for(task,1)
-  self.assertTrue(direct.closed and rtc.closed and services.closed)
+  self.assertTrue(direct.closed and direct_b.closed and rtc.closed and services.closed)
 
 if __name__=='__main__':unittest.main()

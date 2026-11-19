@@ -6,6 +6,14 @@ Any Voice captures permitted app audio, silences original media output and plays
 
 ## Current pipeline
 
+### Numbered parallel generation (0.10)
+
+Fast mode now uses **two persistent Murf connections**. One dispatcher assigns chunk IDs **001, 002, 003… before generation starts**. Each chunk's PCM packets also have position numbers. The first chunk streams immediately; later chunks buffer on disk until every earlier chunk is finished and released. Completing 002 before 001 can never change playback order. Android checks chunk, packet and transport sequence numbers and writes to the same persistent AudioTrack, with no replacement/flush at chunk boundaries.
+
+Generation is bounded to two active requests with a six-chunk preparation window. This uses the account's Murf concurrency allowance; the real account test successfully ran both slots. A failed later chunk does not skip a hole or interrupt an earlier generation. Stop/cancellation cleans up both connections and temporary buffers. Agora RTC/STT and the selectable Engine route remain available; Engine mode stays sequential.
+
+Rollback for this change: Git tag `anyvoice-v0.9-before-parallel` (`b643b8e`), Docker image `anyvoice-backend:rollback-v0.9`, and local `dist/AnyVoice-rollback-0.9.apk`. Parallel preparation helps subsequent chunks; it does not remove the initial wait for translated text.
+
 ### Direct Murf experiment (0.9)
 
 The default fast route keeps **Agora RTC + Agora English-to-Telugu STT/translation** and sends stable Telugu text to a persistent **Murf Falcon WebSocket**. Audio generation runs ahead of playback instead of waiting for an Agora voice turn to finish. Audio is resampled from 24 kHz to 16 kHz and uses the existing ordered 50 ms packet stream and continuous Android player.

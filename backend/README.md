@@ -4,6 +4,10 @@ English audio is recognized and translated to Telugu by **Agora Real-Time STT/Tr
 
 ## Configure
 
+Version 0.10 uses two direct-Murf slots and a bounded ordered-release buffer. Chunk numbers are allocated before any generation, and per-chunk packet numbers are assigned on ordered release. The first chunk streams as it arrives; later completed chunks wait in temporary disk buffers. At most six chunks are admitted ahead, so a slow early chunk applies backpressure without discarding text. Two simultaneous contexts require the account's concurrency allowance (tested with supplied credentials).
+
+The Android 0.10 transport is `GET /v1/sessions/{id}/pcm-stream-v2?after=N`: each binary frame contains four network-order uint32 fields (transport sequence, chunk sequence, packet position, byte count), then PCM. A sixteen-zero-byte frame is a keepalive. Chunk numbers must start at 1 and advance only by one; packet positions reset to 1 per chunk. Legacy `/pcm-stream` remains available for the previous transport. No voice text or PCM payload is logged; assigned/generated/released chunk IDs are logged.
+
 Version 0.9 defaults to `VOICE_PROVIDER=murf-direct`. Both routes use Agora RTC and Agora STT/translation. Direct mode uses a persistent authenticated Falcon WebSocket with `end: true` contexts; it processes every audio chunk, then the final marker, and immediately starts the next generation without waiting for playback. It never automatically replays a partially generated phrase after a network error. An idle closed socket is reopened before the next phrase. This backend uses Python 3.12 (Docker), including its streaming `audioop` resampler.
 
 Set `VOICE_PROVIDER=agora-engine`, or choose that route in Android Connection settings, to use the saved Conversational AI voice flow. `POST /v1/sessions` optionally accepts `voice_provider` (`murf-direct` or `agora-engine`); the response reports the active route. No new provider credentials are needed.

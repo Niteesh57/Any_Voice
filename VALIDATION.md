@@ -1,5 +1,13 @@
 # Stage 1 validation
 
+## Numbered parallel generation 0.10 — 2026-11-19
+
+- Saved 0.9 source at tag `anyvoice-v0.9-before-parallel`, commit `b643b8e`, plus matching Docker image and local rollback APK. Credentials remain ignored.
+- 26 backend tests passed, including forced out-of-order completion, exact sample preservation across three chunks, strict chunk/packet sequence metadata, bounded admission, cancellation cleanup, and a later failure that neither interrupts the earlier chunk nor permits skipping the missing chunk.
+- Real two-connection Falcon test: generation completed in order **002, 001**, while released PCM and numbered wire frames remained **001, 002**. Both chunks generated in approximately 1450 ms and produced 207 packets. This validates ordering and account concurrency, not full translation latency.
+- Android build/lint passed. New receiver validates numbered packets before enqueueing; the persistent AudioTrack is unchanged. Home screen displays the chunk whose audio has reached the playback head.
+- Source recognition/translation and phone speaker fluency remain separate timing/listening checks. Parallel generation cannot make translated text arrive earlier or guarantee continuous speech through network/provider failures.
+
 ## Direct Murf comparison and integration 0.9 — 2026-11-19
 
 - Saved the pre-experiment source at tag `anyvoice-v0.8-before-direct-murf`, commit `6bff126`, plus matching Docker rollback image and local APK. No credentials were committed.

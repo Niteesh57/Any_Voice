@@ -8,6 +8,7 @@ final class ProbeState {
     static volatile String sourceText = "";
     static volatile String translatedText = "";
     static volatile int phrases;
+    static volatile int playingChunk;
     static volatile double db = -96;
     static volatile long frames;
     static volatile long mutedSignalFrames;

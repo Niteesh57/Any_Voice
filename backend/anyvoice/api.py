@@ -42,11 +42,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.9", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.10", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.9"}
+        return {"service": "Any Voice", "version": "0.10"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -137,6 +137,14 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set()),
+            media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
+
+    @app.get("/v1/sessions/{sid}/pcm-stream-v2", dependencies=[Depends(auth)])
+    async def numbered_pcm_stream(sid: str, after: int = 0):
+        session = sessions.get(sid)
+        if not session or not session.audio:
+            raise HTTPException(404, "Audio session not found")
+        return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set(), numbered=True),
             media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
 
     @app.get("/v1/sessions/{sid}/audio/{sequence}", dependencies=[Depends(auth)])
