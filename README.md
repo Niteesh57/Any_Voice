@@ -1,50 +1,20 @@
-# Any Voice — stage 1
+# Any Voice
 
-Native Android experiment for a OnePlus 7 running Android 10 or newer. No translation yet.
+Native Android **English → Telugu** voice translation prototype, built in the context of Build with Agora – Bengaluru 2026.
 
-Any Voice explores replacing an app's original spoken audio with speech in the listener's chosen language. Stage 1 proves the audio path using repeated “hi” output. The user reported the prototype working on their OnePlus 7; translation and universal app/call support are not yet implemented.
+Any Voice captures permitted app audio, silences original media output and plays a Telugu AI voice. Phase one keeps the language pair fixed and the UI simple.
 
-Built in the context of **Build with Agora – Bengaluru 2026**, organized by Agora and powered by KNOTiC. See [hackathon context and next steps](docs/HACKATHON.md) and the [provided event brief](docs/hackathon-brief.txt). The current prototype uses Android playback capture and Android text-to-speech; Agora Conversational AI and Murf Falcon TTS are not integrated yet.
+## Current pipeline
 
-## Install and try
+**Android app audio → Agora RTC → Agora Real-Time STT + Telugu translation → Conversational AI Engine → Murf Falcon → Agora RTC → Android speaker**
 
-Install `dist/AnyVoice-debug.apk` on the phone (allow installation from the file manager when Android asks).
+Agora performs recognition and translation. Falcon generates speech through the Conversational AI agent's `speak` API. There is no separate translation API, translation model, Finch recognizer or third provider account.
 
-The APK is generated locally; binaries are not committed. Build and copy it using the commands below.
+The code is wired for this pipeline. Live service access, Telugu translation quality and updated OnePlus playback still require configured credentials and real-device validation. The earlier local hi prototype was reported working on OnePlus 7. See [validation](VALIDATION.md) for exactly what has been checked.
 
-1. Make the phone's **alarm volume** audible. The app does not change alarm volume.
-2. Play a spoken YouTube video using the **phone speaker**. Begin with ordinary, unprotected media.
-3. Open **Any Voice**. Optionally enable floating controls using the settings button.
-4. Tap **Start capture + mute + hi**, allow audio capture, then approve Android's capture prompt. On versions offering a screen-sharing choice, choose the entire screen for switching apps. The app never creates a virtual display or captures screen images.
-5. Return to the video. It should continue visually, with media sound muted. If captured audio energy is detected, the app says “hi” about once a second using the alarm stream.
-6. Inspect the floating panel, or return to the app for diagnostics. **Non-silent buffers while muted** must keep increasing. Use **Original / replacement comparison** to compare capture with sound restored. Hi is paused in comparison mode.
-7. Tap **Stop + restore** on the panel/notification, or stop inside the app. The previous media volume is restored unless you changed it yourself during the session.
+## Build Android
 
-**Test hi output only** speaks once regardless of capture. This checks the voice engine and routing, but does not prove audio interception.
-
-## What counts as success
-
-All of these must hold on the real phone:
-
-- The source video continues playing.
-- The original audio is inaudible.
-- Hi is audible through the phone speaker.
-- Non-silent capture buffers keep increasing **while muted**.
-- Stopping restores normal playback and media volume.
-
-If capture only works with original sound restored, this volume-based approach does not meet the requirement. If both capture counters stay at zero, the source may block capture, be paused, or be silent. Compare with another source. The meter measures audio energy above -60 dBFS, not speech or language; music also triggers it.
-
-## Scope and limitations
-
-This is a stock-Android **media-volume experiment**, not a system audio replacement driver. Android playback capture copies permitted media/game audio. It cannot guarantee capture of all apps, protected content, or calls. Hi uses an independent alarm usage; device/TTS routing behavior must be verified. No audio focus is requested, to avoid deliberately pausing the source. Bluetooth and headphones are not yet validated.
-
-Android requires `RECORD_AUDIO` permission for playback capture; this app never selects a microphone audio source. Audio buffers are examined in memory and discarded. No Internet permission, recording files, analytics, backend, or translation service is included. Its own UID is excluded from capture.
-
-Normal stop, task dismissal, service teardown, and projection revocation restore saved media volume. After force-stop or a process crash, reopen the app to recover saved volume, or raise media volume manually. Android cannot guarantee application cleanup after force-stop. Only media volume is modified; alarm volume and Do Not Disturb settings are not changed.
-
-## Build
-
-Requires JDK 17+ (tested with JDK 21), Android SDK platform 36, and Android Gradle Plugin 9.0.1 / Gradle 9.3.1.
+Requires JDK 17+ (tested with JDK 21), SDK platform 36 and Android 10+ on the phone.
 
 ```powershell
 .\gradlew.bat :app:assembleDebug :app:lintDebug
@@ -53,10 +23,41 @@ Copy-Item .\app\build\outputs\apk\debug\app-debug.apk .\dist\AnyVoice-debug.apk
 adb install -r .\dist\AnyVoice-debug.apk
 ```
 
-To uninstall, stop the session first, then run `adb uninstall dev.hiprobe`. The application ID remains `dev.hiprobe` for compatibility with the first installed prototype; the displayed product name is Any Voice.
+The APK is generated locally and is not committed. The stable application ID remains `dev.hiprobe` so updates replace the original installed prototype; the displayed name is **Any Voice**.
 
-Source: `app/src/main/java/dev/hiprobe/`. Debug-signed APK is for direct device testing.
+For a smaller OnePlus 7 APK, add `-PtargetAbi=arm64-v8a` to the Gradle command. Default builds include arm64 and x86_64 for phone/emulator testing.
 
-See `VALIDATION.md` for measured emulator results and remaining physical-device checks. `test-source` is a separate developer-only known-audio fixture, not part of the probe APK.
+## Configure and try
 
-References: [Android playback capture](https://developer.android.com/media/platform/av-capture), [media projection service requirements](https://developer.android.com/media/grow/media-projection).
+1. Follow [backend setup](backend/README.md). Only Agora and Murf provider credentials are required, plus your own backend app password and public HTTPS URL.
+2. Install the APK. In **Connection settings**, enter the backend URL and the app access token. Do not put provider API keys in the phone app.
+3. Optionally enable floating controls. Make the phone's **alarm volume** audible; the app does not increase it.
+4. Play an English video and return to Any Voice. Tap **Start listening**, approve capture consent, and return to the video. If Android offers a sharing choice, choose the entire screen for switching apps; screen images are not collected.
+5. Once the session is connected, original media output is muted. English and Telugu captions appear in the app, and the agent's Telugu audio plays through the independent output stream.
+6. Tap **Stop listening**, the floating **Stop + restore**, or the notification action to end the session and restore media volume.
+
+**Local audio check · says hi** retains the offline capture-and-mute diagnostic. It needs no backend and does not demonstrate translation. Its capture meter is available on the floating panel.
+
+To uninstall, stop the active session first:
+
+```powershell
+adb uninstall dev.hiprobe
+```
+
+## Scope
+
+- Permitted media playback on the phone speaker is the first target. Some apps block Android playback capture. Calls and protected playback are not supported by this design.
+- Live mode sends audio to Agora and speech services. The physical microphone is never selected. Raw audio and transcripts are not written to recording files by this app/backend.
+- Translation incurs delay; video is not automatically delayed to match it. Continuous speech can create a backlog; the prototype fails visibly rather than silently dropping queued words.
+- Alarm-stream behavior, DND, Bluetooth, headphones and capture compatibility vary by device. The original media mix, including music/effects, is muted in full.
+- Sessions have a 15-minute maximum and a phone-heartbeat lease. Stop and provider failure paths clean up cloud agents. Cloud cleanup errors require checking Agora Console.
+- Normal stop restores saved media volume unless the user changed it. After a process crash or force-stop, reopen the app for recovery or raise media volume manually.
+
+## Project files
+
+- `app/`: native Java Android client, minimal UI, capture, volume guard, custom Agora audio source/sink.
+- `backend/`: Python control/caption worker, Agora REST integration, setup template, Dockerfile and tests.
+- `test-source/`: separate developer-only audio fixture, not included in the distributed app.
+- [Architecture](docs/ARCHITECTURE.md), [hackathon requirements](docs/HACKATHON.md), [provided event brief](docs/hackathon-brief.txt).
+
+Conversational AI Engine is used for actual spoken output. A conversational explanation/glossary workflow remains future work, so using the engine does not by itself establish every hackathon requirement is complete.

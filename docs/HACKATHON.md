@@ -20,6 +20,8 @@ The supplied common technology requirements call for Agora Conversational AI, Mu
 
 ## Implementation status
 
+Current development: see [the phase-one architecture](ARCHITECTURE.md). Agora STT/translation and Conversational AI `speak` with Falcon are now wired in source; authenticated provider validation is pending. The table below records the original prototype baseline.
+
 | Capability | Status |
 | --- | --- |
 | Native Android installation | Implemented |

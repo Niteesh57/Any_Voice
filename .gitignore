@@ -9,3 +9,9 @@ dist/
 *.keystore
 .env
 .env.*
+!.env.example
+.research/
+**/.venv/
+**/__pycache__/
+*.pyc
+agora_rtc_log/

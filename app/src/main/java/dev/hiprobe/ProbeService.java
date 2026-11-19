@@ -34,6 +34,8 @@ public final class ProbeService extends Service {
     private Button toggle;
     private long nextHi;
     private String failure;
+    private LiveTranslation translation;
+    private boolean liveMode;
     private final MediaProjection.Callback projectionCallback = new MediaProjection.Callback() {
         @Override public void onStop() { finish("Android ended the capture session. Media volume restored."); }
     };
@@ -48,10 +50,16 @@ public final class ProbeService extends Service {
         if (intent == null) { stopSelf(); return START_NOT_STICKY; }
         String action = intent.getAction();
         if (STOP.equals(action)) { finish("Stopped. Media volume restored."); return START_NOT_STICKY; }
-        if (TOGGLE.equals(action)) { if (capturing) setReplacement(!ProbeState.replacing); return START_NOT_STICKY; }
+        if (TOGGLE.equals(action)) {
+            if (capturing && liveMode) finish("Stopped. Original audio restored.");
+            else if (capturing) setReplacement(!ProbeState.replacing);
+            return START_NOT_STICKY;
+        }
         if (TEST_VOICE.equals(action)) { if (capturing) speakHi(true); return START_NOT_STICKY; }
         if (!START.equals(action) || capturing) return START_NOT_STICKY;
         try {
+            if (LiveTranslation.isStopping()) throw new IllegalStateException("Previous session is still stopping. Try again in a moment.");
+            liveMode = intent.getBooleanExtra("live", false);
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 throw new SecurityException("Audio capture permission has not been granted");
             }
@@ -77,10 +85,20 @@ public final class ProbeService extends Service {
             if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IllegalStateException("Capture did not start");
             ProbeState.frames = ProbeState.mutedSignalFrames = ProbeState.audibleSignalFrames = 0;
             ProbeState.db = -96;
+            ProbeState.live = liveMode;
+            ProbeState.sourceText = ""; ProbeState.translatedText = ""; ProbeState.phrases = 0;
             lastSignal = 0; failure = null; capturing = true; ProbeState.running = true;
-            setReplacement(true);
+            ProbeState.replacing = false;
+            if (liveMode) {
+                ProbeState.message = "Connecting to your translation backend…";
+                translation = new LiveTranslation(this, new LiveTranslation.Listener() {
+                    @Override public void ready() { main.post(() -> { if (capturing) setReplacement(true); }); }
+                    @Override public void failed(String message) { main.post(() -> { if (capturing) finish(message); }); }
+                });
+                translation.start();
+            } else setReplacement(true);
             if (!capturing) return START_NOT_STICKY;
-            startVoice();
+            if (!liveMode) startVoice();
             createPanel();
             captureThread = new Thread(this::readAudio, "PlaybackCapture"); captureThread.start();
             main.post(tick);
@@ -89,7 +107,7 @@ public final class ProbeService extends Service {
     }
 
     private void readAudio() {
-        short[] samples = new short[1600];
+        short[] samples = new short[320];
         try {
             while (capturing) {
                 int count = recorder.read(samples, 0, samples.length, AudioRecord.READ_BLOCKING);
@@ -101,6 +119,8 @@ public final class ProbeService extends Service {
                 double rms = Math.sqrt(energy / count) / 32768.0;
                 double db = rms > 0 ? Math.max(-96, 20 * Math.log10(rms)) : -96;
                 ProbeState.db = db; ProbeState.frames++;
+                LiveTranslation session = translation;
+                if (session != null) session.send(samples, count);
                 if (db > -60) {
                     lastSignal = SystemClock.elapsedRealtime();
                     if (ProbeState.replacing && volume.isMuted()) ProbeState.mutedSignalFrames++;
@@ -146,7 +166,7 @@ public final class ProbeService extends Service {
             if (enabled) volume.mute(); else volume.restore();
             ProbeState.replacing = enabled; lastSignal = 0;
             if (tts != null) tts.stop();
-            ProbeState.message = enabled ? "Waiting for capturable audio while media is silent."
+            ProbeState.message = enabled ? (liveMode ? "Listening to English" : "Waiting for capturable audio while media is silent.")
                 : "Comparison: original audio restored; hi is paused.";
         } catch (RuntimeException e) { finish("Volume routing failed: " + e.getMessage()); }
     }
@@ -155,18 +175,19 @@ public final class ProbeService extends Service {
             if (!capturing) return;
             long now = SystemClock.elapsedRealtime();
             if (ProbeState.replacing && !volume.isMuted()) {
+                if (liveMode) { finish("Volume changed. Translation stopped; original audio restored."); return; }
                 setReplacement(false);
                 ProbeState.message = "Media volume changed externally. Replacement paused; use Mute + hi to retry.";
             }
-            if (ProbeState.replacing) {
+            if (ProbeState.replacing && !liveMode) {
                 boolean signal = lastSignal > 0 && now - lastSignal < 1200;
                 ProbeState.message = signal ? "Signal detected while muted. Check you hear ONLY hi."
                     : "No recent signal while muted. Try the original-audio comparison.";
                 if (signal && now >= nextHi) { speakHi(false); nextHi = now + 900; }
             }
-            if (meter != null) meter.setText((ProbeState.replacing ? "MUTED" : "ORIGINAL")
+            if (meter != null) meter.setText(liveMode ? "English → తెలుగు\n" + ProbeState.message : (ProbeState.replacing ? "MUTED" : "ORIGINAL")
                 + " | " + Math.round(ProbeState.db) + " dBFS\nMuted signal buffers: " + ProbeState.mutedSignalFrames);
-            if (toggle != null) toggle.setText(ProbeState.replacing ? "Original (compare)" : "Mute + hi");
+            if (toggle != null) toggle.setText(liveMode ? "Restore original" : ProbeState.replacing ? "Original (compare)" : "Mute + hi");
             main.postDelayed(this, 350);
         }
     };
@@ -177,9 +198,9 @@ public final class ProbeService extends Service {
         PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, ProbeService.class).setAction(STOP), immutable);
         PendingIntent compare = PendingIntent.getService(this, 2, new Intent(this, ProbeService.class).setAction(TOGGLE), immutable);
         return new Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Any Voice is active").setContentText("Internal audio test • tap for diagnostics")
+            .setContentTitle("Any Voice is active").setContentText(liveMode ? "English → Telugu • tap to open" : "Local audio check")
             .setContentIntent(open).setOngoing(true)
-            .addAction(new Notification.Action.Builder(null, "Original / hi", compare).build())
+            .addAction(new Notification.Action.Builder(null, "Original audio", compare).build())
             .addAction(new Notification.Action.Builder(null, "Stop + restore", stop).build()).build();
     }
     private void createPanel() {
@@ -194,8 +215,11 @@ public final class ProbeService extends Service {
             drag.setText("ANY VOICE  •  drag here"); drag.setTextColor(Color.BLACK);
             drag.setTextSize(14); drag.setMinHeight(dp(48)); panel.addView(drag);
             meter = new TextView(this); meter.setTextColor(Color.BLACK); meter.setTextSize(12); panel.addView(meter);
-            toggle = panelButton("Original (compare)", v -> setReplacement(!ProbeState.replacing));
-            panelButton("Test hi", v -> speakHi(true));
+            toggle = panelButton("Original audio", v -> {
+                if (liveMode) finish("Stopped. Original audio restored.");
+                else setReplacement(!ProbeState.replacing);
+            });
+            if (!liveMode) panelButton("Test hi", v -> speakHi(true));
             panelButton("Stop + restore", v -> finish("Stopped from floating controls. Media volume restored."));
             WindowManager.LayoutParams layout = new WindowManager.LayoutParams(dp(220), WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
@@ -232,6 +256,7 @@ public final class ProbeService extends Service {
     }
     private void cleanup() {
         capturing = false; ProbeState.running = false; ProbeState.replacing = false;
+        if (translation != null) { translation.close(); translation = null; }
         main.removeCallbacksAndMessages(null);
         if (recorder != null) {
             try { recorder.stop(); } catch (RuntimeException ignored) { }

@@ -1,5 +1,16 @@
 # Stage 1 validation
 
+## English-to-Telugu integration — 2026-11-19
+
+- Android `:app:assembleDebug :app:lintDebug -PtargetAbi=arm64-v8a`: passed. The packaged phone build is approximately 41 MB and retains application ID `dev.hiprobe`.
+- Backend: 13 tests passed on Windows and in the Linux Docker worker, covering provider requests, Telugu caption parsing, token permissions, deduplication, UTF-8 chunking, authentication and session cleanup. Provider calls are mocked.
+- Linux native Agora SDK initialization and release passed without joining a real channel.
+- Emulator UI rendered the Any Voice home screen and connection dialog. Starting without connection settings opened setup before capture or muting.
+- Separate translation API/model settings were removed. Agora STT translation supplies Telugu text; Conversational AI Engine `speak` uses Murf Falcon for audio.
+- Live cloud translation, voice availability, latency and physical-device translated playback remain unverified pending valid provider credentials and enabled Agora services. The original probe checks below do not validate this new cloud pipeline.
+
+## Original local probe
+
 Product name: **Any Voice**. The initial prototype was branded Hi Audio Probe. The user subsequently reported it working on their OnePlus 7. Device-specific version information and a reproducible physical-device test log have not yet been recorded. The application ID stays `dev.hiprobe` so the renamed build can update the initial install.
 
 Built on 2026-11-18 using JDK 21, AGP 9.0.1, Gradle 9.3.1 and SDK 36.
