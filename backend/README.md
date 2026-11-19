@@ -4,6 +4,10 @@ English audio is recognized and translated to Telugu by **Agora Real-Time STT/Tr
 
 ## Configure
 
+Version 0.9 defaults to `VOICE_PROVIDER=murf-direct`. Both routes use Agora RTC and Agora STT/translation. Direct mode uses a persistent authenticated Falcon WebSocket with `end: true` contexts; it processes every audio chunk, then the final marker, and immediately starts the next generation without waiting for playback. It never automatically replays a partially generated phrase after a network error. An idle closed socket is reopened before the next phrase. This backend uses Python 3.12 (Docker), including its streaming `audioop` resampler.
+
+Set `VOICE_PROVIDER=agora-engine`, or choose that route in Android Connection settings, to use the saved Conversational AI voice flow. `POST /v1/sessions` optionally accepts `voice_provider` (`murf-direct` or `agora-engine`); the response reports the active route. No new provider credentials are needed.
+
 Copy `.env.example` to `.env` and supply:
 
 | Setting | Source |

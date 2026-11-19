@@ -11,17 +11,20 @@ import java.nio.charset.StandardCharsets;
 final class BackendClient {
     private final String base;
     private final String access;
+    private final String voiceProvider;
 
     BackendClient(Context context) {
         SharedPreferences prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE);
         base = prefs.getString("url", BuildConfig.DEFAULT_BACKEND_URL).trim().replaceAll("/+$", "");
         access = prefs.getString("access", "").trim();
+        voiceProvider = prefs.getString("voice_provider", "murf-direct");
     }
-    static void save(Context context, String url, String access) throws Exception {
+    static void save(Context context, String url, String access, String voiceProvider) throws Exception {
         validate(url);
+        if (!voiceProvider.equals("murf-direct") && !voiceProvider.equals("agora-engine")) throw new IllegalArgumentException("Select a voice mode");
         if (access.trim().length() < 6) throw new IllegalArgumentException("Use the app access token configured on your backend (at least 6 characters).");
         context.getSharedPreferences("connection", Context.MODE_PRIVATE).edit()
-            .putString("url", url.trim().replaceAll("/+$", "")).putString("access", access.trim()).apply();
+            .putString("url", url.trim().replaceAll("/+$", "")).putString("access", access.trim()).putString("voice_provider", voiceProvider).apply();
     }
     private static void validate(String value) throws Exception {
         URI uri = new URI(value.trim());
@@ -35,10 +38,11 @@ final class BackendClient {
     }
     String url() { return base; }
     String access() { return access; }
+    String voiceProvider() { return voiceProvider; }
     boolean configured() { return !base.isEmpty() && !access.isEmpty(); }
     JSONObject capabilities() throws Exception { return request("GET", "/v1/capabilities", null); }
     JSONObject start() throws Exception {
-        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "en-IN").put("target_language", "te-IN"));
+        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "en-IN").put("target_language", "te-IN").put("voice_provider", voiceProvider));
     }
     JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id, null); }
     void stop(String id) throws Exception { request("POST", "/v1/sessions/" + id + "/stop", new JSONObject()); }

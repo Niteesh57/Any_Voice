@@ -14,6 +14,7 @@ class Settings:
     public_url: str = ""
     voice: str = "Jaya"
     voice_rate: int = 15
+    voice_provider: str = "murf-direct"
     max_seconds: int = 900
 
     @classmethod
@@ -28,6 +29,7 @@ class Settings:
             public_url=os.getenv("ANYVOICE_PUBLIC_URL", "").rstrip("/"),
             voice=os.getenv("MURF_VOICE_ID", "Jaya"),
             voice_rate=max(-50, min(50, int(os.getenv("MURF_SPEECH_RATE", "15")))),
+            voice_provider=os.getenv("VOICE_PROVIDER", "murf-direct"),
             max_seconds=min(900, max(60, int(os.getenv("MAX_SESSION_SECONDS", "900")))),
         )
 
@@ -41,6 +43,8 @@ class Settings:
         return [key for key, value in values.items() if not value or value.startswith("replace-with-")]
 
     def validate(self):
+        if self.voice_provider not in ("murf-direct", "agora-engine"):
+            raise ValueError("VOICE_PROVIDER must be murf-direct or agora-engine")
         if self.missing():
             raise ValueError("Configure: " + ", ".join(self.missing()))
         for value in (self.agora_app_id, self.agora_certificate):

@@ -16,7 +16,7 @@ from anyvoice.session import Pipeline, Session, token_for
 def configured():
     return Settings(access_token="local-test-access-token-12345", agora_app_id="a" * 32,
         agora_certificate="b" * 32, agora_customer_id="customer", agora_customer_secret="secret",
-        murf_key="murf-test", public_url="https://voice.example")
+        murf_key="murf-test", public_url="https://voice.example", voice_provider="agora-engine")
 
 
 def caption(text="నమస్కారం", final=True, identity=123, uid=1001):

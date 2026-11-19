@@ -6,6 +6,18 @@ Any Voice captures permitted app audio, silences original media output and plays
 
 ## Current pipeline
 
+### Direct Murf experiment (0.9)
+
+The default fast route keeps **Agora RTC + Agora English-to-Telugu STT/translation** and sends stable Telugu text to a persistent **Murf Falcon WebSocket**. Audio generation runs ahead of playback instead of waiting for an Agora voice turn to finish. Audio is resampled from 24 kHz to 16 kHz and uses the existing ordered 50 ms packet stream and continuous Android player.
+
+In **Connection settings → Voice mode**, choose **Fast · direct Murf streaming** or **Agora Conversational AI Engine**. The Engine route remains implemented and runnable for the hackathon demonstration and comparisons. The fast route does not start an unused voice agent; Agora RTC and translation remain active in both modes. This preserves the Engine integration but does not assert that the fast route alone fulfills every hackathon requirement.
+
+A three-text, same-voice/rate comparison measured median voice first-audio of **224 ms direct versus 579 ms Engine**, and aggregate generation of **3136 ms versus 17489 ms**. Direct socket setup added 300 ms. See [benchmark data](docs/murf-streaming-benchmark.json). These measurements exclude recognition/translation and are not full end-to-end latency claims. A synthetic English-video integration still waited about eight seconds for its first PCM; upstream translation/context remains a separate bottleneck.
+
+Rollback checkpoint: Git tag `anyvoice-v0.8-before-direct-murf` (`6bff126`), Docker image `anyvoice-backend:rollback-v0.8`, and local `dist/AnyVoice-rollback-0.8.apk`. Credentials remain in the ignored local environment file.
+
+### Previous streaming transport (retained)
+
 Version **0.8** streams generated Telugu PCM immediately in **50 ms packets** over one persistent authenticated HTTP connection. It no longer waits for a complete phrase before sending audio. Android uses a roughly **100 ms starting buffer**, writes at most 100 ms per call, and keeps one persistent AudioTrack fed continuously. There is no per-packet playback-completion wait and no automatic backlog pause/restart behavior.
 
 Stable Telugu text goes to Agora Conversational AI + Murf Falcon immediately. Provider completion events order TTS requests, while audio delivery runs independently during generation. Packet sizes are transport units, not a promise of 50/100 ms end-to-end translation latency. Recognition, language context and network time still contribute; target speech that takes longer than the source can still accumulate delay. Audio is transient and deleted after playback acknowledgement or session cleanup. Explicit Stop remains immediate; sessions retain the existing 15-minute limit.

@@ -1,5 +1,14 @@
 # Stage 1 validation
 
+## Direct Murf comparison and integration 0.9 — 2026-11-19
+
+- Saved the pre-experiment source at tag `anyvoice-v0.8-before-direct-murf`, commit `6bff126`, plus matching Docker rollback image and local APK. No credentials were committed.
+- Compared three identical Telugu texts, Jaya/Falcon 2.1/rate 15/24 kHz, same Linux host. Both routes were persistent/warm, with alternating order. Median first audible PCM: 224 ms direct, 579 ms Engine. Aggregate full generation: 3136 ms direct, 17489 ms Engine. Direct connection setup: 300 ms. Three samples cannot establish general latency distributions.
+- Real integration fixture: English PCM published via Agora RTC, transcribed/translated by Agora, synthesized directly by Falcon, resampled to 16 kHz, and queued in order. Two Telugu phrases / 8619 ms of PCM were generated. First PCM was approximately 7981 ms after source publication began, showing that upstream startup/translation context still contributes substantial delay.
+- The same synthetic fixture through the saved 0.8 Docker image started PCM at approximately 9041 ms and produced 8660 ms of audio. This one-run end-to-end comparison improved by about 1060 ms; it does not establish a general improvement distribution.
+- 22 tests passed, including resampling with odd network chunk boundaries, authentication in headers, context ordering, cleanup, no replay after partial audio failure, direct-mode Agora STT use, and generating a second phrase before any playback acknowledgement.
+- Android build/lint passed. The existing Engine route remains separately selectable; direct mode does not start an idle Engine voice agent. Full phone listening remains a user check.
+
 ## Streaming audio 0.8 — 2026-11-19
 
 Later timing review: 15 real voice requests had median first audio 697 ms (265–752 ms). Total generation/control time was 90331 ms for 79950 ms of PCM, a 10381 ms difference. The path includes Agora, Murf, RTC and turn signaling; this is not isolated Murf model latency. Text request limits were increased from 256 to 512 UTF-8 bytes without waiting to fill requests, and configurable Murf rate 15 was enabled. A controlled direct Falcon test produced 5559 ms of PCM at rate 15 versus 5910 ms at rate 0 for the same text; speech rate is not an end-to-end latency guarantee. Translation and queue-wait instrumentation was added. 18 tests and live pre-completion packet streaming passed after tuning.

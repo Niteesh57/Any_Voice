@@ -7,8 +7,8 @@ android {
         applicationId = "dev.hiprobe"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 9
+        versionName = "0.9"
         val backendUrl = providers.gradleProperty("anyVoiceBackendUrl").orElse("").get()
         require(backendUrl.matches(Regex("[a-zA-Z0-9:/._-]*"))) { "Invalid backend URL" }
         buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$backendUrl\"")

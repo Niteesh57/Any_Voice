@@ -1,0 +1,37 @@
+{
+  "method": "Same three Telugu texts, same Jaya voice, Falcon 2.1, rate 15, 24kHz synthesis resampled to 16kHz; warm persistent routes, alternating order; connection setup excluded from first-audio timing.",
+  "direct_connection_setup_ms": 300,
+  "results": [
+    {
+      "case": 0,
+      "agora_first_audio_ms": 579,
+      "agora_complete_ms": 2537,
+      "direct_first_audio_ms": 178,
+      "direct_complete_ms": 361,
+      "direct_audio_ms": 1830
+    },
+    {
+      "case": 1,
+      "agora_first_audio_ms": 573,
+      "agora_complete_ms": 7405,
+      "direct_first_audio_ms": 269,
+      "direct_complete_ms": 1690,
+      "direct_audio_ms": 7117
+    },
+    {
+      "case": 2,
+      "agora_first_audio_ms": 834,
+      "agora_complete_ms": 7547,
+      "direct_first_audio_ms": 224,
+      "direct_complete_ms": 1085,
+      "direct_audio_ms": 6737
+    }
+  ],
+  "summary": {
+    "agora_median_first_audio_ms": 579,
+    "direct_median_first_audio_ms": 224,
+    "agora_total_generation_ms": 17489,
+    "direct_total_generation_ms": 3136
+  },
+  "limitations": "Three samples, one region/network/time window; not full English-audio-to-Telugu latency; excludes session setup and translation."
+}

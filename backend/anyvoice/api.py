@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
+from typing import Literal
 
 from .config import Settings
 from .rtc import native_available
@@ -18,6 +19,7 @@ load_dotenv()
 class StartRequest(BaseModel):
     source_language: str = "en-IN"
     target_language: str = "te-IN"
+    voice_provider: Literal["murf-direct", "agora-engine"] | None = None
 
 
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available):
@@ -40,11 +42,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.8", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.9", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.8"}
+        return {"service": "Any Voice", "version": "0.9"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -80,7 +82,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                     del sessions[sid]
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
-            session = Session()
+            session = Session(voice_provider=request.voice_provider or settings.voice_provider)
             sessions[session.id] = session
             try:
                 pipeline = pipeline_factory(settings, session)

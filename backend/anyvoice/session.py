@@ -9,6 +9,7 @@ from .providers import AgoraServices, ProviderError
 from .rtc import AgoraTransport
 from .completion import SpeechCompletion
 from .audio_queue import AudioQueue
+from .murf_stream import MurfStream
 
 
 @dataclass
@@ -31,6 +32,7 @@ class Session:
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
     audio: object = None
+    voice_provider: str | None = None
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
@@ -38,6 +40,7 @@ class Session:
                 "phrases": self.phrases, "audio_frames": self.audio_frames,
                 "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
                 "last_audio_sequence": self.audio.next_sequence - 1 if self.audio else 0,
+                "voice_provider": self.voice_provider,
                 "source_language": "en-IN", "target_language": "te-IN"}
 
 
@@ -59,12 +62,14 @@ def token_for(settings, session, uid):
 
 
 class Pipeline:
-    def __init__(self, settings, session, transport=None, services=None, completion=None):
+    def __init__(self, settings, session, transport=None, services=None, completion=None, direct=None):
         self.settings, self.session = settings, session
+        session.voice_provider = session.voice_provider or settings.voice_provider
         token = lambda uid: token_for(settings, session, uid)
         self.rtc = transport or AgoraTransport(settings, session, token(session.control_uid))
         self.services = services or AgoraServices(settings, session, token)
         self.completion = completion or SpeechCompletion(settings, session, token(session.control_uid))
+        self.direct = direct or MurfStream(settings)
         self.phrases = asyncio.Queue()
         self.session.audio = AudioQueue()
         self.capture = None
@@ -130,14 +135,17 @@ class Pipeline:
             for chunk in speech_chunks(text, limit=512):
                 self.session.message = 'Listening - preparing Telugu audio'
                 self.streaming_started = True
-                self.completion.begin()
+                if self.session.voice_provider == 'agora-engine': self.completion.begin()
                 submitted = time.monotonic()
                 self.log.info('latency session=%s stage=caption_queue_wait ms=%.0f bytes=%d',
                     self.session.id[:8], (submitted-queued)*1000, len(chunk.encode('utf-8')))
                 self.awaiting_audio_since = submitted
-                await self.services.speak(chunk)
-                # Completion only orders TTS requests; it never gates audio delivery.
-                await self.completion.wait()
+                if self.session.voice_provider == 'murf-direct':
+                    await self.direct.synthesize(chunk, self.receive_pcm, self.receive_speech)
+                else:
+                    await self.services.speak(chunk)
+                    # Engine route is retained for hackathon demo and A/B comparisons.
+                    await self.completion.wait()
                 if self.packet_buffer:
                     self.session.audio.append(bytes(self.packet_buffer))
                     self.packet_buffer.clear()
@@ -159,8 +167,12 @@ class Pipeline:
     async def run(self):
         try:
             await self.rtc.open(self.receive_caption, self.receive_speech, self.fail)
-            await self.completion.open()
-            await self.services.open()
+            if self.session.voice_provider == 'murf-direct':
+                await self.direct.open()
+                await self.services.open_stt()
+            else:
+                await self.completion.open()
+                await self.services.open()
             self.session.touched = time.monotonic()
             self.session.state, self.session.message = "ready", "Listening to English"
             self.session.ready.set()
@@ -196,7 +208,8 @@ class Pipeline:
                     try:
                         await self.completion.close()
                     finally:
-                        await self.rtc.close()
+                        try: await self.direct.close()
+                        finally: await self.rtc.close()
                 except Exception:
                     self.session.state = "error"
                     self.session.message = "Control connection cleanup failed."

@@ -106,11 +106,17 @@ public final class MainActivity extends Activity {
         url.setHint("https://your-backend.example"); url.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI); fields.addView(url);
         EditText token = new EditText(this); token.setSingleLine(true); token.setText(saved.access());
         token.setHint("App access token"); token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); fields.addView(token);
+        text(fields, "Voice mode · both use Agora RTC and translation", 12, MUTED);
+        Spinner mode = new Spinner(this);
+        ArrayAdapter<String> modes = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item,
+            new String[]{"Fast · direct Murf streaming", "Agora Conversational AI Engine"});
+        modes.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        mode.setAdapter(modes); mode.setSelection(saved.voiceProvider().equals("agora-engine") ? 1 : 0); fields.addView(mode);
         text(fields, "On the same Wi-Fi, use your computer's IP with port 8000 (debug build). USB testing also supports http://127.0.0.1:8000.", 12, MUTED);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Connect Any Voice").setView(fields)
             .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create();
         dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
-            try { BackendClient.save(this, url.getText().toString(), token.getText().toString()); ProbeState.message = "Connection saved. Ready to start."; dialog.dismiss(); }
+            try { BackendClient.save(this, url.getText().toString(), token.getText().toString(), mode.getSelectedItemPosition() == 1 ? "agora-engine" : "murf-direct"); ProbeState.message = "Connection saved. Ready to start."; dialog.dismiss(); }
             catch (Exception e) { url.setError(e.getMessage()); }
         }));
         dialog.show();

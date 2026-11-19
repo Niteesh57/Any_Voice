@@ -31,6 +31,10 @@ class AgoraServices:
         return self.project + path + "/projects/" + self.settings.agora_app_id
 
     async def open(self):
+        await self.open_stt()
+        await self.open_voice()
+
+    async def open_stt(self):
         s = self.session
         result = await self.request("POST", self.base("stt") + "/join", {
             "name": "av_stt_" + s.id, "languages": ["en-IN"], "maxIdleTime": 30,
@@ -44,6 +48,9 @@ class AgoraServices:
         self.stt_id = result.get("agent_id")
         if not self.stt_id:
             raise ProviderError("Agora did not return the translation agent ID")
+
+    async def open_voice(self):
+        s = self.session
         result = await self.request("POST", self.base("voice") + "/join", {
             "name": "av_voice_" + s.id,
             "properties": {

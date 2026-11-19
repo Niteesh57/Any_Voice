@@ -20,6 +20,8 @@ The supplied common technology requirements call for Agora Conversational AI, Mu
 
 ## Implementation status
 
+Version 0.9 has two selectable voice routes. **Fast · direct Murf** uses Agora RTC/STT/translation and direct Falcon generation. **Agora Conversational AI Engine** exercises the existing Engine + Falcon integration. Select Engine mode when demonstrating the explicit Engine technology requirement. The direct route by itself is not evidence of Engine usage, and the original requirement for agentic tools/actions is still separate work.
+
 Current development: see [the phase-one architecture](ARCHITECTURE.md). Agora STT/translation and Conversational AI `speak` with Falcon are now wired in source; authenticated provider validation is pending. The table below records the original prototype baseline.
 
 | Capability | Status |
