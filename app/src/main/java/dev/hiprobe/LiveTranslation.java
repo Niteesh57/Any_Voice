@@ -37,6 +37,8 @@ final class LiveTranslation {
     private volatile Policy policy = new Policy(0, false);
     private int acknowledgedSequence;
     private volatile int downloadedSequence;
+    private volatile long lastPacketAt;
+    boolean outputIdle(){return downloadedSequence<=playedSequence&&prepared.isEmpty()&&SystemClock.elapsedRealtime()-lastPacketAt>2000;}
     private volatile String terminalMessage;
     private volatile int terminalSequence;
     private int customTrack = -1;
@@ -130,6 +132,7 @@ final class LiveTranslation {
         if (closed.get() || sessionId == null) return;
         try {
             JSONObject status = backend.status(sessionId);
+            if(closed.get())return;
             String state = status.getString("state");
             int epoch = status.getInt("route_epoch");
             boolean translated = "translated".equals(status.getString("route_mode"));
@@ -194,7 +197,7 @@ final class LiveTranslation {
                             throw new IllegalStateException("Voice chunk numbering is out of order");
                         byte[] pcm = new byte[size]; in.readFully(pcm);
                         prepared.put(new PreparedAudio(sequence, chunk, part, epoch, pcm));
-                        after = sequence; downloadedSequence = sequence;
+                        after = sequence; downloadedSequence = sequence;lastPacketAt=SystemClock.elapsedRealtime();
                         lastChunk = chunk; lastPart = part; lastEpoch = epoch;
                     }
                 }
@@ -291,7 +294,7 @@ final class LiveTranslation {
             }
             stopRemote();
             network.shutdown();
-            if(bubble)try{network.awaitTermination(90,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
+            try{network.awaitTermination(90,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}
             } finally { stopping = false; }
         }, "TranslationCleanup").start();
     }

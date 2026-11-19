@@ -98,3 +98,13 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 - Saved 0.11 before redesign: tag `anyvoice-v0.11-before-app-redesign`, commit `b3bd3d3`, Docker rollback image and APK.
 - Phone disconnected before installation. User requested completing the build and will reconnect later. New screens, preview playback and drag/tap/rotation behavior still need real-device visual/interaction checks.
 - Automatic approval review blocked starting the Android emulator with “blocked by policy”; no emulator was launched.
+
+
+## Unified floating control 0.15 — 2026-11-19
+
+- Saved exact previous 0.14 source as commit `7c2bac0`, tag `anyvoice-v0.14-before-unified`; matching rollback APK: `dist/AnyVoice-rollback-before-unified.apk`.
+- One foreground service now owns playback monitoring, microphone mode, one cloud session and one floating panel. One Enable/Disable control replaces the separate media/Bubble starts. Existing Agora translation and Murf backend are unchanged.
+- Standalone JVM policy regression scenarios passed for quiet input, isolated clicks, sustained media, sentence gaps, quiet-period return, immediate microphone gating on app sound, explicit Ask Bubble override, automatic return and timeout.
+- `:app:assembleDebug` and `:app:lintDebug` passed. No provider credentials were added to Android. Provider configuration remains in ignored backend/.env.
+- Device installation and live mode-transition checks are pending: ADB lost the connected OnePlus during the first install attempt. Windows sees its file-transfer device, but ADB lists no device. Do not interpret the build/policy results as a completed on-phone audio test.
+- Known limits: source choice uses sustained captured audio levels, not semantic voice classification. Music can keep media mode selected. Switching reconnects Agora/provider sessions and adds connection time. Media input is buffered in memory (bounded to 20 seconds) while connecting, and mode changes wait for played output plus a quiet grace period. See docs/unified-bubble.md.

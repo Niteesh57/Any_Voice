@@ -3,6 +3,7 @@ package dev.hiprobe;
 /** In-memory diagnostics only: no audio or transcript is stored. */
 final class ListeningState {
     static volatile boolean running;
+    static volatile boolean manualConversation;
     static volatile boolean replacing;
     static volatile String detectedLanguage = "";
     static volatile String sourceText = "";

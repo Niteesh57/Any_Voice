@@ -12,7 +12,6 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
-        <service android:name=".BubbleService" android:exported="false" android:foregroundServiceType="microphone" />
-        <service android:name=".ListeningService" android:exported="false" android:foregroundServiceType="mediaProjection" />
+        <service android:name=".ListeningService" android:exported="false" android:foregroundServiceType="mediaProjection|microphone" />
     </application>
 </manifest>

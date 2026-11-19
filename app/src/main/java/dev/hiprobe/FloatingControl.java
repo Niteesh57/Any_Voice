@@ -32,9 +32,9 @@ final class FloatingControl {
         logo=new BrandView(context,false,0xffe5f2d2);logo.setPadding(dp(11),dp(11),dp(11),dp(11));logo.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);logo.setContentDescription("Any Voice floating controls. Tap to open; drag to move.");logo.setFocusable(true);panel.addView(logo,new LinearLayout.LayoutParams(dp(52),dp(52)));
         details=new LinearLayout(context);details.setOrientation(LinearLayout.VERTICAL);details.setPadding(dp(18),0,dp(18),dp(16));details.setVisibility(View.GONE);panel.addView(details);
         text(details,bubble?"bubble":"any voice",19,0xfff6f5ef);state=text(details,"Listening",12,0xffd9edb5);caption=text(details,"",13,0xffd4e1d7);caption.setMaxLines(3);caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        if(bubble){askButton=text(details,"Ask Bubble",15,0xffd9edb5);askButton.setMinHeight(dp(48));askButton.setGravity(Gravity.CENTER);askButton.setBackground(shape(0xff295f4d,14));askButton.setContentDescription("Ask Bubble. Tap to start or end a conversation.");askButton.setOnClickListener(v->{if(ask!=null)ask.run();});}
+        if(ask!=null){askButton=text(details,"Ask Bubble",15,0xffd9edb5);askButton.setMinHeight(dp(48));askButton.setGravity(Gravity.CENTER);askButton.setBackground(shape(0xff295f4d,14));askButton.setContentDescription("Ask Bubble. Temporarily switch from media to conversation.");askButton.setOnClickListener(v->{if(ask!=null)ask.run();});}
         TextView open=text(details,"Open app  ↗",13,Color.WHITE);open.setMinHeight(dp(44));open.setGravity(Gravity.CENTER_VERTICAL);open.setOnClickListener(v->{context.startActivity(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));collapse();});
-        TextView end=text(details,bubble?"Disable Bubble":"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
+        TextView end=text(details,ask!=null?"Disable":bubble?"Disable Bubble":"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
         layout=new WindowManager.LayoutParams(dp(52),dp(52),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
         layout.gravity=Gravity.TOP|Gravity.START;layout.alpha=.78f;layout.x=width()-dp(64);layout.y=dp(170);
         logo.setOnClickListener(v->{autoExpanded=false;expanded=!expanded;applySize();});
@@ -63,7 +63,9 @@ final class FloatingControl {
     }
     void update(){
         if(panel==null)return;logo.active(bubble?BubbleState.active:ListeningState.running);
-        if(bubble){
+        if(ask!=null){
+            if(expanded){askButton.setText(ListeningState.manualConversation?"Return to automatic":"Ask Bubble");state.setText(BubbleState.active?BubbleState.message:ListeningState.message);String value=BubbleState.active?BubbleState.reply:ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Automatically follows app audio and your questions.":value);}
+        }else if(bubble){
             if(expanded){if(askButton!=null)askButton.setText(BubbleState.active?"End conversation":"Ask Bubble");state.setText(BubbleState.message);String value=BubbleState.reply.isEmpty()?BubbleState.heard:BubbleState.reply;caption.setText(value.isEmpty()?"Tap Ask Bubble, speak, then pause for an answer.":value);}
         }else if(expanded){UserProfile profile=new UserProfile(context);state.setText(ListeningState.replacing?"Translating · "+profile.languageName():ListeningState.detectedLanguage.isEmpty()?"Finding the language":"Original voice · "+profile.languageName());String value=ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Your audio, in your language.":value);}
     }

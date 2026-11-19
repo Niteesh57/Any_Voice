@@ -9,10 +9,13 @@ Hear app audio in the language you choose. A native Android hackathon app built 
 - Both the preview and session-start APIs refresh the provider catalog and validate the exact voice ID against its declared native `locale` and `supportedLocales`. Unsupported pairs are rejected; there is no automatic substitute voice.
 - Output options cover the intersection of Falcon locales and Agora transcription/translation support, including documented locale-code mappings. The current catalog yielded 138 compatible voices and 43 locale options; these counts are dynamic. Hinglish is excluded because Agora has no corresponding translation target.
 - Original audio stays audible during initial detection. Speech in the selected language keeps its original voice; other detected languages are translated and spoken by the selected Falcon voice.
+- One Enable/Disable control starts automatic media translation and Bubble conversation. Media takes priority; after sustained quiet, the microphone can take questions while unlocked. Ask Bubble temporarily overrides media.
 - A translucent 52 dp floating bubble can be dragged, snaps to a screen edge, and expands on tap to show status and controls.
 - Animated waveform, screen entrances, voice sheet and button feedback. System motion settings are respected.
 
-Name and gender stay on the phone. Provider keys remain in ignored `backend/.env`. Android's capture permission is required; the physical microphone is disabled. Only apps permitting Android playback capture can be heard. Agora detects among at most four configured source languages; the picker shows the active shortlist for each output language.
+Name and gender stay on the phone. Provider keys remain in ignored `backend/.env`. Android's capture permission is required. Media mode captures app playback; conversation mode sends microphone audio through Agora to Qwen, then speaks text replies with Murf. Microphone input is gated during replies and released on lock or media mode. Only apps permitting Android playback capture can be heard. Agora detects among at most four configured source languages; the picker shows the active shortlist for each output language.
+
+See [unified mode and rollback](docs/unified-bubble.md) for switching behavior and limits.
 
 ## Run
 
