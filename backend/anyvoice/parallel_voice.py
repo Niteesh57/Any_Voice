@@ -14,6 +14,7 @@ class Chunk:
     text: str
     queued: float
     path: Path
+    epoch: int = 0
     written: int = 0
     released: int = 0
     part: int = 0
@@ -21,7 +22,8 @@ class Chunk:
     error: str | None = None
 
 class ParallelVoice:
-    def __init__(self, clients, audio, on_error, on_generated, log, window=6):
+    def __init__(self, clients, audio, on_error, on_generated, log, window=6, is_current=None):
+        self.is_current = is_current or (lambda epoch: True)
         self.clients, self.audio = clients, audio
         self.on_error, self.on_generated, self.log = on_error, on_generated, log
         self.directory = Path(tempfile.mkdtemp(prefix='anyvoice-parallel-'))
@@ -48,12 +50,17 @@ class ParallelVoice:
 
     async def dispatch(self, phrases):
         while True:
-            text, queued = await phrases.get()
+            item = await phrases.get()
+            text, queued = item[:2]
+            epoch = item[2] if len(item)>2 else 0
             for text_part in speech_chunks(text, limit=512):
                 await self.window.acquire()
+                if not self.is_current(epoch):
+                    self.window.release()
+                    break
                 number = self.next_number
                 self.next_number += 1
-                chunk = Chunk(number, text_part, queued, self.directory / ('%08d.pcm' % number))
+                chunk = Chunk(number, text_part, queued, self.directory / ('%08d.pcm' % number),epoch=epoch)
                 chunk.path.touch()
                 self.chunks[number] = chunk
                 self.log.info('chunk_assigned chunk=%03d bytes=%d',number,len(text_part.encode('utf-8')))
@@ -62,11 +69,15 @@ class ParallelVoice:
     async def worker(self, slot, client):
         while True:
             chunk = await self.jobs.get()
+            if not self.is_current(chunk.epoch):
+                chunk.done = True
+                self.release_ready()
+                continue
             started = time.monotonic()
             first_audio = False
             self.log.info('chunk_start slot=%d chunk=%03d queue_ms=%.0f',slot+1,chunk.number,(started-chunk.queued)*1000)
             def pcm(data):
-                if self.closed or self.failed: return
+                if self.closed or self.failed or not self.is_current(chunk.epoch): return
                 if not data or len(data)%2: raise ProviderError('Invalid PCM from voice generator.')
                 if chunk.written+len(data)>16000*2*90: raise ProviderError('Voice chunk exceeded the audio limit.')
                 with open(chunk.path,'ab') as out: out.write(data)
@@ -79,6 +90,10 @@ class ParallelVoice:
                     self.log.info('chunk_first_audio slot=%d chunk=%03d ms=%.0f',slot+1,chunk.number,(time.monotonic()-started)*1000)
             try:
                 await client.synthesize(chunk.text, pcm, first)
+                if not self.is_current(chunk.epoch):
+                    chunk.done = True
+                    self.release_ready()
+                    continue
                 if not chunk.written: raise ProviderError('Voice chunk was empty.')
                 chunk.done = True
                 self.log.info('chunk_generated slot=%d chunk=%03d audio_ms=%d generation_ms=%.0f',
@@ -98,6 +113,12 @@ class ParallelVoice:
         while True:
             chunk = self.chunks.get(self.next_release)
             if chunk is None: return
+            if not self.is_current(chunk.epoch):
+                del self.chunks[chunk.number]
+                chunk.path.unlink(missing_ok=True)
+                self.next_release += 1
+                self.window.release()
+                continue
             available = chunk.written - chunk.released
             while available >= 1600 or (chunk.done and available > 0):
                 size = min(1600,available)
@@ -105,7 +126,7 @@ class ParallelVoice:
                     source.seek(chunk.released); data = source.read(size)
                 if len(data)!=size: raise ProviderError('Numbered audio buffer is incomplete.')
                 chunk.part += 1
-                self.audio.append(data, chunk.number, chunk.part)
+                self.audio.append(data, chunk.number, chunk.part, chunk.epoch)
                 self.log.debug('chunk_packet chunk=%03d part=%03d sequence=%d',chunk.number,chunk.part,self.audio.next_sequence-1)
                 chunk.released += size; available -= size
             if not chunk.done: return

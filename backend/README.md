@@ -1,5 +1,16 @@
 # Any Voice backend
 
+## Automatic language routing (0.11)
+
+Start listening in any app that permits Android playback capture. Original media stays audible while Agora identifies speech. The configured detection shortlist is English, Hindi, Tamil and Telugu (`AUTO_SOURCE_LANGUAGES=en-IN,hi-IN,ta-IN,te-IN`, maximum four). Confirmed Telugu restores original media volume and suppresses generated speech. Other detected languages are translated by Agora into Telugu and spoken by Murf Falcon. Capture continues in both modes, without opening the microphone. Unknown/unconfigured languages are not guaranteed to be recognized correctly.
+
+Stable source captions determine the route, using sentence IDs to match translated results. A finalized source result, or consistent evolving partials spanning at least 300 ms, confirms a language. Source offsets reject old decisions. Translation arriving before its source classification is held in a bounded buffer. Language changes increment a route epoch; old generation and queued audio from previous epochs are discarded deliberately. Within the active epoch every numbered chunk plays fully in order. The Android player flushes only on a confirmed language change or Stop.
+
+Protocol 3 (`pcm-stream-v3`) adds the route epoch: five network-order uint32 fields `(transport sequence, chunk, part, epoch, byte count)`, followed by mono 16 kHz PCM16. Transport numbering remains continuous across route changes; obsolete packets are consumed and acknowledged without playback. Status exposes `route_mode`, `route_epoch`, `detected_language`, and the detection shortlist. Legacy stream endpoints remain available. Initial detection and switching are subject to Agora's recognition latency.
+
+Rollback: source tag `anyvoice-v0.10-before-auto-language` (commit `e4765ea`), Docker image `anyvoice-backend:rollback-v0.10`, APK `dist/AnyVoice-rollback-0.10.apk`. Local environment backup is retained privately under `.research/rollback-before-auto-0.10/`. Provider keys remain in ignored `backend/.env`.
+
+
 English audio is recognized and translated to Telugu by **Agora Real-Time STT/Translation**. Final Telugu text is sent to **Agora Conversational AI Engine's `speak` API**, whose TTS provider is **Murf Falcon 2.1**. There is no Finch recognizer, external translation API, external translation model or third provider key.
 
 ## Configure

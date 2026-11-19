@@ -18,7 +18,11 @@ def decode_message(data: bytes, source_uid: int):
         rows = transcription.get("results", [])
         text = "".join(row.get("text", "") for row in rows) if rows else transcription.get("text", "")
         if text:
-            yield {"kind": "source", "text": text}
+            yield {"kind": "source", "text": text,
+                   "language": transcription.get("language"),
+                   "id": str(transcription.get("sentenceId") or transcription.get("textTs") or ""),
+                   "offset": transcription.get("offset"),
+                   "final": transcription.get("isFinal") is True or any(r.get("isFinal") is True for r in rows)}
     translation = item.get("translation")
     if not translation or str(translation.get("uid")) != str(source_uid):
         return

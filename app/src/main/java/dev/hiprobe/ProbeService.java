@@ -92,7 +92,16 @@ public final class ProbeService extends Service {
             if (liveMode) {
                 ProbeState.message = "Connecting to your translation backend…";
                 translation = new LiveTranslation(this, new LiveTranslation.Listener() {
-                    @Override public void ready() { main.post(() -> { if (capturing) setReplacement(true); }); }
+                    @Override public void ready() { main.post(() -> { if (capturing) ProbeState.message = "Detecting language - original audio"; }); }
+                    @Override public void routing(boolean translated) {
+                        java.util.concurrent.FutureTask<Void> change = new java.util.concurrent.FutureTask<>(() -> {
+                            if (capturing) setReplacement(translated);
+                            return null;
+                        });
+                        main.post(change);
+                        try { change.get(2, java.util.concurrent.TimeUnit.SECONDS); }
+                        catch (Exception e) { change.cancel(false); throw new IllegalStateException("Could not switch media audio", e); }
+                    }
                     @Override public void failed(String message) { main.post(() -> { if (capturing) finish(message); }); }
                 });
                 translation.start();
@@ -166,8 +175,8 @@ public final class ProbeService extends Service {
             if (enabled) volume.mute(); else volume.restore();
             ProbeState.replacing = enabled; lastSignal = 0;
             if (tts != null) tts.stop();
-            ProbeState.message = enabled ? (liveMode ? "Listening to English" : "Waiting for capturable audio while media is silent.")
-                : "Comparison: original audio restored; hi is paused.";
+            ProbeState.message = enabled ? (liveMode ? "Translating to Telugu" : "Waiting for capturable audio while media is silent.")
+                : liveMode ? "Telugu detected - original audio" : "Comparison: original audio restored; hi is paused.";
         } catch (RuntimeException e) { finish("Volume routing failed: " + e.getMessage()); }
     }
     private final Runnable tick = new Runnable() {
@@ -185,7 +194,7 @@ public final class ProbeService extends Service {
                     : "No recent signal while muted. Try the original-audio comparison.";
                 if (signal && now >= nextHi) { speakHi(false); nextHi = now + 900; }
             }
-            if (meter != null) meter.setText(liveMode ? "English → తెలుగు\n" + ProbeState.message : (ProbeState.replacing ? "MUTED" : "ORIGINAL")
+            if (meter != null) meter.setText(liveMode ? "Auto → తెలుగు\n" + ProbeState.message : (ProbeState.replacing ? "MUTED" : "ORIGINAL")
                 + " | " + Math.round(ProbeState.db) + " dBFS\nMuted signal buffers: " + ProbeState.mutedSignalFrames);
             if (toggle != null) toggle.setText(liveMode ? "Restore original" : ProbeState.replacing ? "Original (compare)" : "Mute + hi");
             main.postDelayed(this, 350);
@@ -198,7 +207,7 @@ public final class ProbeService extends Service {
         PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, ProbeService.class).setAction(STOP), immutable);
         PendingIntent compare = PendingIntent.getService(this, 2, new Intent(this, ProbeService.class).setAction(TOGGLE), immutable);
         return new Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Any Voice is active").setContentText(liveMode ? "English → Telugu • tap to open" : "Local audio check")
+            .setContentTitle("Any Voice is active").setContentText(liveMode ? "Auto language → Telugu • tap to open" : "Local audio check")
             .setContentIntent(open).setOngoing(true)
             .addAction(new Notification.Action.Builder(null, "Original audio", compare).build())
             .addAction(new Notification.Action.Builder(null, "Stop + restore", stop).build()).build();

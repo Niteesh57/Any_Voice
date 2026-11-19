@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class LiveTranslation {
     private static volatile boolean stopping;
     static boolean isStopping() { return stopping; }
-    interface Listener { void ready(); void failed(String message); }
+    interface Listener { void ready(); void routing(boolean translated); void failed(String message); }
     private final Context context;
     private final BackendClient backend;
     private final Listener listener;
@@ -28,6 +28,11 @@ final class LiveTranslation {
     private volatile String sessionId;
     private volatile boolean outputEnabled = true;
     private volatile int playedSequence;
+    private static final class Policy {
+        final int epoch; final boolean translated;
+        Policy(int epoch, boolean translated) { this.epoch = epoch; this.translated = translated; }
+    }
+    private volatile Policy policy = new Policy(0, false);
     private int acknowledgedSequence;
     private volatile int downloadedSequence;
     private volatile String terminalMessage;
@@ -39,9 +44,9 @@ final class LiveTranslation {
     private volatile java.net.HttpURLConnection audioConnection;
     private final ArrayBlockingQueue<PreparedAudio> prepared = new ArrayBlockingQueue<>(100);
     private static final class PreparedAudio {
-        final int sequence, chunk, part; final byte[] pcm;
-        PreparedAudio(int sequence, int chunk, int part, byte[] pcm) {
-            this.sequence = sequence; this.chunk = chunk; this.part = part; this.pcm = pcm;
+        final int sequence, chunk, part, epoch; final byte[] pcm;
+        PreparedAudio(int sequence, int chunk, int part, int epoch, byte[] pcm) {
+            this.sequence = sequence; this.chunk = chunk; this.part = part; this.epoch = epoch; this.pcm = pcm;
         }
     }
 
@@ -56,8 +61,8 @@ final class LiveTranslation {
                 sessionId = data.getString("id");
                 if (!"queued-pcm".equals(data.optString("playback_mode")))
                     throw new IllegalStateException("Backend needs the queued-audio update");
-                if (data.optInt("audio_protocol") != 2)
-                    throw new IllegalStateException("Backend needs the numbered-audio update");
+                if (data.optInt("audio_protocol") != 3)
+                    throw new IllegalStateException("Backend needs the automatic-language update");
                 if (closed.get()) { stopRemote(); return; }
                 workerUid = data.getInt("worker_uid");
                 initialize(data);
@@ -89,7 +94,7 @@ final class LiveTranslation {
         engine = RtcEngine.create(config);
         require(engine.enableAudio(), "enable audio");
         require(engine.enableLocalAudio(false), "disable microphone capture");
-        // RTC uploads English only. Prepared Telugu is played by our own ordered AudioTrack.
+        // RTC uploads captured playback only. Prepared Telugu is played by our own ordered AudioTrack.
         AudioTrackConfig trackConfig = new AudioTrackConfig();
         trackConfig.enableLocalPlayback = false;
         customTrack = engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE, trackConfig);
@@ -105,7 +110,7 @@ final class LiveTranslation {
         output.setVolume(0.75f); output.play();
         playback = new Thread(this::render, "TeluguPlayback"); playback.start();
         downloading = new Thread(this::downloadAudio, "TeluguPrefetch"); downloading.start();
-        publishing = new Thread(this::publish, "EnglishUpload"); publishing.start();
+        publishing = new Thread(this::publish, "SourceUpload"); publishing.start();
         ChannelMediaOptions options = new ChannelMediaOptions();
         options.channelProfile = Constants.CHANNEL_PROFILE_LIVE_BROADCASTING;
         options.clientRoleType = Constants.CLIENT_ROLE_BROADCASTER;
@@ -121,6 +126,9 @@ final class LiveTranslation {
         try {
             JSONObject status = backend.status(sessionId);
             String state = status.getString("state");
+            int epoch = status.getInt("route_epoch");
+            boolean translated = "translated".equals(status.getString("route_mode"));
+            if (epoch != policy.epoch || translated != policy.translated) policy = new Policy(epoch,translated);
             if (state.equals("error") || state.equals("stopped")) {
                 terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
                 terminalMessage = status.optString("message", "Session ended");
@@ -128,7 +136,7 @@ final class LiveTranslation {
             ProbeState.sourceText = status.optString("source_text");
             ProbeState.translatedText = status.optString("translated_text");
             ProbeState.phrases = status.optInt("phrases");
-            ProbeState.message = status.optString("message", "Listening to English");
+            ProbeState.message = status.optString("message", "Detecting language");
             if (playedSequence > acknowledgedSequence) {
                 int completed = playedSequence;
                 try { backend.audioPlayed(sessionId, completed); acknowledgedSequence = completed; }
@@ -157,7 +165,7 @@ final class LiveTranslation {
     }
     private void downloadAudio() {
         int after = 0;
-        int lastChunk = 0, lastPart = 0;
+        int lastChunk = 0, lastPart = 0, lastEpoch = -1;
         while (!closed.get()) {
             java.net.HttpURLConnection connection = null;
             try {
@@ -165,18 +173,20 @@ final class LiveTranslation {
                 connection = backend.audioStream(sessionId, after); audioConnection = connection;
                 try (java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(connection.getInputStream()))) {
                     while (!closed.get()) {
-                        int sequence = in.readInt(), chunk = in.readInt(), part = in.readInt(), size = in.readInt();
-                        if (sequence == 0 && chunk == 0 && part == 0 && size == 0) continue;
+                        int sequence = in.readInt(), chunk = in.readInt(), part = in.readInt(), epoch = in.readInt(), size = in.readInt();
+                        if (sequence == 0 && chunk == 0 && part == 0 && epoch == 0 && size == 0) continue;
                         if (sequence != after + 1 || size < 2 || size > 3200 || size % 2 != 0)
                             throw new IllegalStateException("Invalid numbered audio packet");
                         boolean sameChunk = chunk == lastChunk && part == lastPart + 1;
                         boolean nextChunk = chunk == lastChunk + 1 && part == 1;
+                        if (epoch > lastEpoch) { sameChunk = false; nextChunk = part == 1; }
+                        if (epoch < lastEpoch) throw new IllegalStateException("Audio language routing is out of order");
                         if ((!sameChunk && !nextChunk) || chunk < 1 || part < 1)
                             throw new IllegalStateException("Telugu chunk numbering is out of order");
                         byte[] pcm = new byte[size]; in.readFully(pcm);
-                        prepared.put(new PreparedAudio(sequence, chunk, part, pcm));
+                        prepared.put(new PreparedAudio(sequence, chunk, part, epoch, pcm));
                         after = sequence; downloadedSequence = sequence;
-                        lastChunk = chunk; lastPart = part;
+                        lastChunk = chunk; lastPart = part; lastEpoch = epoch;
                     }
                 }
             } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
@@ -193,37 +203,53 @@ final class LiveTranslation {
     private void render() {
         long framesWritten = 0;
         java.util.ArrayDeque<long[]> ends = new java.util.ArrayDeque<>();
+        Policy applied = policy;
+        PreparedAudio clip = null;
         boolean first = true;
         try {
             while (!closed.get()) {
+                Policy wanted = policy;
+                if (wanted != applied) {
+                    // Only a confirmed language change cancels obsolete translated audio.
+                    output.pause(); output.flush();
+                    if (!ends.isEmpty()) playedSequence = (int)ends.peekLast()[0];
+                    ends.clear(); framesWritten = 0; first = true; ProbeState.playingChunk = 0;
+                    listener.routing(wanted.translated); // Applies media volume on the service thread before playback.
+                    if (closed.get()) return;
+                    output.play(); applied = wanted;
+                }
                 long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
                 while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
                     long[] done = ends.removeFirst();
                     playedSequence = (int)done[0]; ProbeState.playingChunk = (int)done[2];
                 }
-                PreparedAudio clip = prepared.poll(50, TimeUnit.MILLISECONDS);
+                if (clip == null) clip = prepared.poll(50, TimeUnit.MILLISECONDS);
                 if (clip == null) {
                     if (terminalMessage != null && downloadedSequence >= terminalSequence && ends.isEmpty()) { fail(terminalMessage); return; }
                     continue;
                 }
-                // Start with approximately 100 ms of audio; keep writing continuously after that.
+                if (clip.epoch < applied.epoch || (clip.epoch == applied.epoch && !applied.translated)) {
+                    playedSequence = clip.sequence; clip = null; continue;
+                }
+                if (clip.epoch > applied.epoch) { Thread.sleep(10); continue; }
                 if (first) {
                     long deadline = SystemClock.elapsedRealtime() + 100;
                     while (prepared.isEmpty() && SystemClock.elapsedRealtime() < deadline && !closed.get()) Thread.sleep(5);
                     first = false;
                 }
+                if (policy != applied) continue;
                 int offset = 0;
-                while (offset < clip.pcm.length && !closed.get()) {
-                    int count = Math.min(3200, clip.pcm.length - offset); // at most 100 ms per write
-                    int written = output.write(clip.pcm, offset, count, AudioTrack.WRITE_BLOCKING);
+                while (offset < clip.pcm.length && !closed.get() && policy == applied) {
+                    int written = output.write(clip.pcm, offset, Math.min(3200, clip.pcm.length-offset), AudioTrack.WRITE_BLOCKING);
                     if (written <= 0) throw new IllegalStateException("Translated audio playback stopped");
                     offset += written; framesWritten += written / 2;
                 }
                 ends.addLast(new long[]{clip.sequence, framesWritten, clip.chunk});
-                // No per-packet completion wait: queued samples never replace existing samples.
+                clip = null;
+                // Ordinary chunks finish in order. No flush or interruption at chunk boundaries.
             }
         } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-        catch (RuntimeException e) { if (!closed.get()) fail("Translated audio playback failed"); }
+        catch (RuntimeException e) { if (!closed.get()) fail("Audio routing failed: " + e.getMessage()); }
     }
     private void fail(String message) { if (!closed.get()) listener.failed(message); }
     private static void require(int code, String action) { if (code != 0) throw new IllegalStateException("Could not " + action + " (" + code + ")"); }

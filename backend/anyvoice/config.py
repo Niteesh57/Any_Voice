@@ -15,11 +15,13 @@ class Settings:
     voice: str = "Jaya"
     voice_rate: int = 15
     voice_provider: str = "murf-direct"
+    auto_languages: tuple = ("en-IN", "hi-IN", "ta-IN", "te-IN")
     max_seconds: int = 900
 
     @classmethod
     def from_env(cls):
         return cls(
+            auto_languages=tuple(x.strip() for x in os.getenv("AUTO_SOURCE_LANGUAGES", "en-IN,hi-IN,ta-IN,te-IN").split(",") if x.strip()),
             access_token=os.getenv("ANYVOICE_ACCESS_TOKEN", ""),
             agora_app_id=os.getenv("AGORA_APP_ID", ""),
             agora_certificate=os.getenv("AGORA_APP_CERTIFICATE", ""),
@@ -43,6 +45,8 @@ class Settings:
         return [key for key, value in values.items() if not value or value.startswith("replace-with-")]
 
     def validate(self):
+        if not 2 <= len(self.auto_languages) <= 4 or len(set(self.auto_languages)) != len(self.auto_languages) or "te-IN" not in self.auto_languages:
+            raise ValueError("AUTO_SOURCE_LANGUAGES needs 2-4 unique languages including te-IN")
         if self.voice_provider not in ("murf-direct", "agora-engine"):
             raise ValueError("VOICE_PROVIDER must be murf-direct or agora-engine")
         if self.missing():

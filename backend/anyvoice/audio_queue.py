@@ -16,7 +16,7 @@ class AudioQueue:
         self.changed = asyncio.Event()
         self.closed = False
 
-    def append(self, pcm, chunk_sequence=None, part_sequence=1):
+    def append(self, pcm, chunk_sequence=None, part_sequence=1, epoch=0):
         if not pcm or len(pcm) % 2: raise ValueError('Incomplete PCM audio')
         # 15-minute sessions normally produce <30 MB; protect disk without dropping queued speech.
         if self.total_bytes + len(pcm) > 128 * 1024 * 1024: raise ValueError('Session audio storage limit reached')
@@ -25,12 +25,12 @@ class AudioQueue:
         temporary = path.with_suffix('.part')
         temporary.write_bytes(pcm); temporary.replace(path)
         self.clips[seq] = {'sequence': seq, 'chunk_sequence': chunk_sequence if chunk_sequence is not None else seq,
-            'part_sequence': part_sequence, 'bytes': len(pcm), 'duration_ms': len(pcm) * 1000 // 32000, 'path': path}
+            'part_sequence': part_sequence, 'epoch': epoch, 'bytes': len(pcm), 'duration_ms': len(pcm) * 1000 // 32000, 'path': path}
         self.next_sequence += 1; self.total_bytes += len(pcm)
         self.changed.set()
         return seq
 
-    async def packets(self, after, finished, numbered=False):
+    async def packets(self, after, finished, numbered=False, routed=False):
         while not self.closed:
             self.changed.clear()
             row = self.clips.get(after + 1)
@@ -39,13 +39,14 @@ class AudioQueue:
                 after += 1
                 header = (struct.pack('!IIII',after,row['chunk_sequence'],row['part_sequence'],len(payload))
                     if numbered else struct.pack('!II', after, len(payload)))
+                if routed: header = struct.pack("!IIIII",after,row["chunk_sequence"],row["part_sequence"],row["epoch"],len(payload))
                 yield header + payload
                 continue
             if finished(): return
             try:
                 await asyncio.wait_for(self.changed.wait(), 3)
             except asyncio.TimeoutError:
-                yield bytes(16 if numbered else 8)  # keepalive, never audio
+                yield bytes(20 if routed else 16 if numbered else 8)  # keepalive, never audio
 
     def manifest(self, after):
         return {'sample_rate': self.sample_rate, 'clips': [

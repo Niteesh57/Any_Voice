@@ -37,13 +37,13 @@ class AgoraServices:
     async def open_stt(self):
         s = self.session
         result = await self.request("POST", self.base("stt") + "/join", {
-            "name": "av_stt_" + s.id, "languages": ["en-IN"], "maxIdleTime": 30,
+            "name": "av_stt_" + s.id, "languages": list(s.source_languages), "maxIdleTime": 30,
             "rtcConfig": {
                 "channelName": s.channel, "pubBotUid": str(s.stt_uid),
                 "pubBotToken": self.token(s.stt_uid),
                 "subscribeAudioUids": [str(s.source_uid)], "enableJsonProtocol": True,
             },
-            "translateConfig": {"languages": [{"source": "en-IN", "target": ["te-IN"]}]},
+            "translateConfig": {"languages": [{"source": language, "target": ["te-IN"]} for language in s.source_languages if language != "te-IN"]},
         })
         self.stt_id = result.get("agent_id")
         if not self.stt_id:

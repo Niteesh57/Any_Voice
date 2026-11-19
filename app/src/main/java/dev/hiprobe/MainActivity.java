@@ -37,9 +37,9 @@ public final class MainActivity extends Activity {
             status.setText(running ? ProbeState.message : ProbeState.message.startsWith("Ready.") ? "Ready when you are" : ProbeState.message);
             if (running && ProbeState.live && ProbeState.playingChunk > 0)
                 status.append(String.format(java.util.Locale.US, " · Playing chunk %03d", ProbeState.playingChunk));
-            source.setText(ProbeState.sourceText.isEmpty() ? "Your English audio will appear here." : ProbeState.sourceText);
+            source.setText(ProbeState.sourceText.isEmpty() ? "Captured speech will appear here." : ProbeState.sourceText);
             translated.setText(ProbeState.translatedText.isEmpty() ? "తెలుగులో వినండి.\nYour Telugu translation will appear here." : ProbeState.translatedText);
-            connection.setText(new BackendClient(MainActivity.this).configured() ? "Backend saved · English → Telugu" : "Connect your backend to begin");
+            connection.setText(new BackendClient(MainActivity.this).configured() ? "Backend saved · Auto → Telugu" : "Connect your backend to begin");
             overlay.setText(Settings.canDrawOverlays(MainActivity.this) ? "Floating controls enabled ✓" : "Enable floating controls");
             handler.postDelayed(this, 250);
         }
@@ -59,20 +59,20 @@ public final class MainActivity extends Activity {
         });
         TextView mark = text(body, "a v  /  ANY VOICE", 13, GREEN); mark.setLetterSpacing(0.15f); bold(mark);
         TextView title = text(body, "A new language.\nThe same meaning.", 31, INK); bold(title);
-        text(body, "Listen to English in natural Telugu.", 16, MUTED);
+        text(body, "Your audio, in your language.", 16, MUTED);
         LinearLayout language = card(body);
         text(language, "FROM                         TO", 11, MUTED);
-        TextView pair = text(language, "English     →     తెలుగు", 25, INK); bold(pair);
-        text(language, "English audio · Telugu voice", 13, MUTED);
+        TextView pair = text(language, "Auto     →     తెలుగు", 25, INK); bold(pair);
+        text(language, "Detects English, Hindi, Tamil & Telugu", 13, MUTED);
         status = text(body, "Ready when you are", 15, GREEN);
         start = button(body, "Start listening", true, v -> {
             if (ProbeState.running) command(ProbeService.STOP);
             else { nextLive = true; preflight(); }
         });
-        text(body, "Play an English video, tap Start, then return to it. Only translated speech plays once connected. Keep alarm volume audible.", 13, MUTED);
+        text(body, "Tap Start and play audio in any capturable app. Telugu keeps its original voice; other detected languages play in Telugu. Keep alarm volume audible.", 13, MUTED);
         LinearLayout captions = card(body);
         text(captions, "ENGLISH", 11, MUTED);
-        source = text(captions, "Your English audio will appear here.", 16, INK);
+        source = text(captions, "Captured speech will appear here.", 16, INK);
         text(captions, "తెలుగు  /  TELUGU", 11, GREEN);
         translated = text(captions, "తెలుగులో వినండి.", 20, INK);
         connection = text(body, "Connect your backend to begin", 12, MUTED);

@@ -42,7 +42,7 @@ final class BackendClient {
     boolean configured() { return !base.isEmpty() && !access.isEmpty(); }
     JSONObject capabilities() throws Exception { return request("GET", "/v1/capabilities", null); }
     JSONObject start() throws Exception {
-        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "en-IN").put("target_language", "te-IN").put("voice_provider", voiceProvider));
+        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", "te-IN").put("voice_provider", voiceProvider));
     }
     JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id, null); }
     void stop(String id) throws Exception { request("POST", "/v1/sessions/" + id + "/stop", new JSONObject()); }
@@ -51,7 +51,7 @@ final class BackendClient {
     }
     HttpURLConnection audioStream(String id, int after) throws Exception {
         validate(base);
-        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream-v2?after=" + after).openConnection();
+        HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream-v3?after=" + after).openConnection();
         c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(10000);
         c.setRequestProperty("Authorization", "Bearer " + access);
         if (c.getResponseCode() != 200) { c.disconnect(); throw new IOException("Audio stream unavailable"); }

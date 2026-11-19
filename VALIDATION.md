@@ -77,3 +77,12 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 ```
 
 `test-source` is only a repeatable developer fixture and is not included in the distributed probe APK.
+
+
+## 0.11 automatic routing — 2026-11-19
+
+- 30 backend tests pass, including delayed source/translation ordering, Telugu suppression, return to translation, stale-caption rejection, cancellation of active old generation, and epoch-aware wire framing.
+- Android arm64 debug assemble and lint pass.
+- Real provider test with generated public test speech streamed through Agora RTC: Telugu -> English -> Telugu produced routes `original(1) -> translated(2) -> original(3)`. The first Telugu phase produced no TTS packets; English produced Telugu PCM. Detection took approximately 4.8 s, 7.7 s and 3.1 s respectively in this synthetic sample. This is an observation, not a latency guarantee.
+- Provider accepted the four-language STT setup and non-Telugu-to-Telugu mappings. Hindi and Tamil recognition quality has not been separately measured.
+- Docker health reports 0.11. APK installed on OnePlus 7 (88e07cd0), package versionCode 11/versionName 0.11.

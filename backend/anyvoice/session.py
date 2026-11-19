@@ -34,6 +34,11 @@ class Session:
     task: asyncio.Task | None = None
     audio: object = None
     voice_provider: str | None = None
+    source_language: str = "en-IN"
+    source_languages: tuple = ("en-IN",)
+    detected_language: str = ""
+    route_mode: str = "detecting"
+    route_epoch: int = 0
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
@@ -42,8 +47,10 @@ class Session:
                 "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
                 "last_audio_sequence": self.audio.next_sequence - 1 if self.audio else 0,
                 "voice_provider": self.voice_provider,
-                "audio_protocol": 2,
-                "source_language": "en-IN", "target_language": "te-IN"}
+                "audio_protocol": 3,
+                "route_mode": self.route_mode, "route_epoch": self.route_epoch,
+                "detected_language": self.detected_language, "source_languages": self.source_languages,
+                "source_language": self.source_language, "target_language": "te-IN"}
 
 
 def token_for(settings, session, uid):
@@ -89,6 +96,14 @@ class Pipeline:
         self.parallel = None
         self.engine_chunk = 0
         self.engine_part = 0
+        self.engine_epoch = 0
+        self.language_segments = {}
+        self.pending_translations = {}
+        self.latest_source_offset = -1
+        self.candidate = None
+        if session.source_language != "auto":
+            session.route_mode = "translated"
+            session.detected_language = session.source_language
 
     def fail(self, message):
         if not self.error.done():
@@ -103,48 +118,103 @@ class Pipeline:
         self.session.audio_frames += 1
         self.last_speech = time.monotonic()
 
-    def receive_caption(self, data):
-        if self.session.stopped.is_set():
+    def current_epoch(self, epoch):
+        return self.session.route_mode == "translated" and epoch == self.session.route_epoch
+
+    def route_source(self, item):
+        language, identity = item.get("language"), item.get("id")
+        if language not in self.session.source_languages or not identity:
             return
+        offset = item.get("offset")
+        if isinstance(offset, (int,float)) and offset < self.latest_source_offset:
+            return  # Delayed source captions cannot undo a newer language decision.
+        now = time.monotonic()
+        prior = self.candidate
+        stable = item.get("final") or (prior and prior[0] == language and prior[1] == identity
+            and prior[2] != item["text"] and now-prior[3] >= .3)
+        if prior is None or prior[:2] != (language,identity):
+            self.candidate = (language,identity,item["text"],now)
+        if not stable:
+            return
+        if isinstance(offset, (int,float)): self.latest_source_offset = offset
+        session = self.session
+        if session.detected_language != language:
+            session.route_epoch += 1
+            session.detected_language = language
+            session.route_mode = "original" if language == "te-IN" else "translated"
+            session.translated = ""
+            self.packet_buffer.clear()
+            if self.parallel: self.parallel.release_ready()
+            self.log.info("language_route session=%s language=%s mode=%s epoch=%d",
+                session.id[:8],language,session.route_mode,session.route_epoch)
+        session.message = "Telugu detected - original audio" if language == "te-IN" else language + " detected - translating to Telugu"
+        self.language_segments[identity] = (language,session.route_epoch)
+        if len(self.language_segments)>2000: self.language_segments.pop(next(iter(self.language_segments)))
+        pending = self.pending_translations.pop(identity,None)
+        if pending: self.accept_translation(pending)
+
+    def accept_translation(self, item):
+        if self.session.source_language == "auto":
+            segment = self.language_segments.get(item["id"])
+            if segment is None:
+                self.pending_translations[item["id"]] = item
+                if len(self.pending_translations)>128: self.pending_translations.pop(next(iter(self.pending_translations)))
+                return
+            language, epoch = segment
+            if language == "te-IN" or not self.current_epoch(epoch): return
+        else:
+            epoch = self.session.route_epoch
+        delta = self.finals.accept(item["id"], item["text"])
+        if delta.strip():
+            end_ms = item.get("speech_end_ms")
+            if end_ms is not None and 0 <= time.time()*1000-end_ms < 120000:
+                self.log.info("latency session=%s stage=speech_end_to_translation ms=%.0f",
+                    self.session.id[:8],time.time()*1000-end_ms)
+            self.session.translated = item["text"]
+            self.phrases.put_nowait((delta,time.monotonic(),epoch))
+
+    def receive_caption(self, data):
+        if self.session.stopped.is_set(): return
         try:
-            for item in decode_message(data, self.session.source_uid):
+            for item in decode_message(data,self.session.source_uid):
                 if item["kind"] == "source":
                     self.session.source = item["text"]
-                else:
-                    delta = self.finals.accept(item["id"], item["text"])
-                    if delta.strip():
-                        end_ms = item.get('speech_end_ms')
-                        if end_ms is not None and 0 <= time.time()*1000-end_ms < 120000:
-                            self.log.info('latency session=%s stage=speech_end_to_translation ms=%.0f',
-                                self.session.id[:8], time.time()*1000-end_ms)
-                        self.session.translated = item["text"]
-                        self.phrases.put_nowait((delta, time.monotonic()))
+                    if self.session.source_language == "auto": self.route_source(item)
+                else: self.accept_translation(item)
         except Exception as exc:
-            logging.getLogger("anyvoice").error("Caption decode failed: %s; bytes=%s; prefix=%s", type(exc).__name__, len(data), data[:12].hex())
+            self.log.error("Caption decode failed: %s; bytes=%s",type(exc).__name__,len(data))
             self.fail("Could not process Agora captions.")
 
     def receive_pcm(self, pcm):
-        if not self.streaming_started or self.session.stopped.is_set(): return
+        if not self.streaming_started or self.session.stopped.is_set() or not self.current_epoch(self.engine_epoch): return
         self.packet_buffer.extend(pcm)
         while len(self.packet_buffer) >= 1600:  # 50 ms, mono 16 kHz PCM16
             self.engine_part += 1
-            self.session.audio.append(bytes(self.packet_buffer[:1600]),max(1,self.engine_chunk),self.engine_part)
+            self.session.audio.append(bytes(self.packet_buffer[:1600]),max(1,self.engine_chunk),self.engine_part,self.engine_epoch)
             del self.packet_buffer[:1600]
 
     async def speak_phrases(self):
         if self.session.voice_provider == 'murf-direct':
             def generated(): self.session.phrases += 1
-            self.parallel = ParallelVoice([self.direct,self.direct_b],self.session.audio,self.fail,generated,self.log)
+            self.parallel = ParallelVoice([self.direct,self.direct_b],self.session.audio,self.fail,generated,self.log,is_current=self.current_epoch)
             await self.parallel.run(self.phrases)
             return
         while True:
-            text, queued = await self.phrases.get()
+            phrase = await self.phrases.get()
+            text, queued = phrase[:2]
+            epoch = phrase[2] if len(phrase)>2 else self.session.route_epoch
+            if not self.current_epoch(epoch): continue
             # Submit stable text immediately. Audio itself streams in 50 ms packets.
             while not self.phrases.empty():
-                following, _ = self.phrases.get_nowait()
+                phrase = self.phrases.get_nowait()
+                following = phrase[0]
+                following_epoch = phrase[2] if len(phrase)>2 else self.session.route_epoch
+                if following_epoch != epoch: continue
                 text += ' ' + following
                 if len(text.encode('utf-8')) >= 512: break
             for chunk in speech_chunks(text, limit=512):
+                if not self.current_epoch(epoch): break
+                self.engine_epoch = epoch
                 self.engine_chunk += 1
                 self.engine_part = 0
                 self.session.message = 'Listening - preparing Telugu audio'
@@ -157,9 +227,9 @@ class Pipeline:
                 await self.services.speak(chunk)
                 # Engine route is retained for hackathon demo and A/B comparisons.
                 await self.completion.wait()
-                if self.packet_buffer:
+                if self.packet_buffer and self.current_epoch(epoch):
                     self.engine_part += 1
-                    self.session.audio.append(bytes(self.packet_buffer),self.engine_chunk,self.engine_part)
+                    self.session.audio.append(bytes(self.packet_buffer),self.engine_chunk,self.engine_part,self.engine_epoch)
                     self.packet_buffer.clear()
                 self.session.phrases += 1
                 self.log.info('speech_streamed session=%s last_packet=%d generation_ms=%.0f',
@@ -186,7 +256,7 @@ class Pipeline:
                 await self.completion.open()
                 await self.services.open()
             self.session.touched = time.monotonic()
-            self.session.state, self.session.message = "ready", "Listening to English"
+            self.session.state, self.session.message = "ready", "Detecting language - original audio" if self.session.source_language == "auto" else "Listening to English"
             self.session.ready.set()
             self.work = [asyncio.create_task(coro) for coro in (
                 self.speak_phrases(), self.monitor(), self.session.stopped.wait(),
