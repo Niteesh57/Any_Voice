@@ -86,3 +86,15 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 - Real provider test with generated public test speech streamed through Agora RTC: Telugu -> English -> Telugu produced routes `original(1) -> translated(2) -> original(3)`. The first Telugu phase produced no TTS packets; English produced Telugu PCM. Detection took approximately 4.8 s, 7.7 s and 3.1 s respectively in this synthetic sample. This is an observation, not a latency guarantee.
 - Provider accepted the four-language STT setup and non-Telugu-to-Telugu mappings. Hindi and Tamil recognition quality has not been separately measured.
 - Docker health reports 0.11. APK installed on OnePlus 7 (88e07cd0), package versionCode 11/versionName 0.11.
+
+
+## 0.12 app redesign and dynamic voices — 2026-11-19
+
+- Android debug assemble/lint and all 37 backend tests pass; current APK is built for the OnePlus arm64 device.
+- Full dynamic Falcon catalog queried live: 138 compatible voices / 43 locale options at the time of the check. No static character list or preselected voice remains. The native-only Bengali record was independently tested with real Falcon generation (approximately 3.61 s audio) before including its provider-declared native locale; counts may change.
+- Live female and male Telugu previews passed (16 kHz mono WAV, approximately 3.66 s / 3.13 s).
+- Real English PCM -> Agora RTC/STT -> Japanese translation -> dynamically selected Japanese Falcon voice -> queued PCM passed: two phrases / 11.05 s output, first PCM at approximately 7.8 s in this synthetic sample. This is not a latency guarantee or an audio-quality rating for every catalog voice.
+- Backend rejects a fabricated voice ID with HTTP 422. Tests cover fresh catalog validation, unsupported pairs, absent selection, native/supported-locales-only filtering, aliases, preview cleanup/cache and non-Telugu provider configuration.
+- Saved 0.11 before redesign: tag `anyvoice-v0.11-before-app-redesign`, commit `b3bd3d3`, Docker rollback image and APK.
+- Phone disconnected before installation. User requested completing the build and will reconnect later. New screens, preview playback and drag/tap/rotation behavior still need real-device visual/interaction checks.
+- Automatic approval review blocked starting the Android emulator with “blocked by policy”; no emulator was launched.

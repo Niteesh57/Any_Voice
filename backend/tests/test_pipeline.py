@@ -3,6 +3,7 @@ from dataclasses import replace
 import gzip
 import json
 import unittest
+from unittest.mock import patch, AsyncMock
 
 import httpx
 
@@ -129,7 +130,8 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("[DONE]", idle.text)
             self.assertNotIn("translation", idle.text)
 
-    async def test_session_lifecycle_and_single_session(self):
+    @patch("anyvoice.voices.VoiceCatalog.validate",new_callable=AsyncMock)
+    async def test_session_lifecycle_and_single_session(self,validate):
         class FakePipeline:
             def __init__(self, settings, session): self.session = session
             async def run(self):
@@ -143,12 +145,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             unsupported = await client.post("/v1/sessions", json={"target_language": "hi-IN"}, headers=headers)
             self.assertEqual(unsupported.status_code, 422)
-            result = await client.post("/v1/sessions", json={}, headers=headers)
+            result = await client.post("/v1/sessions", json={"voice_id":"fixture-voice"}, headers=headers)
             self.assertEqual(result.status_code, 200)
             session = result.json()
             self.assertNotIn(settings.agora_certificate, result.text)
             self.assertNotIn(settings.murf_key, result.text)
-            self.assertEqual((await client.post("/v1/sessions", json={}, headers=headers)).status_code, 409)
+            self.assertEqual((await client.post("/v1/sessions", json={"voice_id":"fixture-voice"}, headers=headers)).status_code, 409)
             stopped = await client.post("/v1/sessions/" + session["id"] + "/stop", headers=headers)
             self.assertEqual(stopped.json()["state"], "stopped")
 

@@ -1,5 +1,5 @@
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import time
 import uuid
 import logging
@@ -22,7 +22,7 @@ class Session:
     control_uid: int = 3001
     stt_uid: int = 4001
     state: str = "connecting"
-    message: str = "Connecting Agora translation and Telugu voice"
+    message: str = "Connecting your translation and voice"
     source: str = ""
     translated: str = ""
     phrases: int = 0
@@ -34,6 +34,9 @@ class Session:
     task: asyncio.Task | None = None
     audio: object = None
     voice_provider: str | None = None
+    target_language: str = "te-IN"
+    voice_locale: str | None = None
+    voice_id: str | None = None
     source_language: str = "en-IN"
     source_languages: tuple = ("en-IN",)
     detected_language: str = ""
@@ -50,7 +53,7 @@ class Session:
                 "audio_protocol": 3,
                 "route_mode": self.route_mode, "route_epoch": self.route_epoch,
                 "detected_language": self.detected_language, "source_languages": self.source_languages,
-                "source_language": self.source_language, "target_language": "te-IN"}
+                "source_language": self.source_language, "target_language": self.target_language, "voice_id": self.voice_id}
 
 
 def token_for(settings, session, uid):
@@ -72,6 +75,7 @@ def token_for(settings, session, uid):
 
 class Pipeline:
     def __init__(self, settings, session, transport=None, services=None, completion=None, direct=None, direct_b=None):
+        settings = replace(settings,voice=session.voice_id or settings.voice,target_locale=session.voice_locale or session.target_language)
         self.settings, self.session = settings, session
         session.voice_provider = session.voice_provider or settings.voice_provider
         token = lambda uid: token_for(settings, session, uid)
@@ -118,6 +122,9 @@ class Pipeline:
         self.session.audio_frames += 1
         self.last_speech = time.monotonic()
 
+    def is_target_language(self, language):
+        return language.split("-")[0] == self.session.target_language.split("-")[0]
+
     def current_epoch(self, epoch):
         return self.session.route_mode == "translated" and epoch == self.session.route_epoch
 
@@ -141,13 +148,13 @@ class Pipeline:
         if session.detected_language != language:
             session.route_epoch += 1
             session.detected_language = language
-            session.route_mode = "original" if language == "te-IN" else "translated"
+            session.route_mode = "original" if self.is_target_language(language) else "translated"
             session.translated = ""
             self.packet_buffer.clear()
             if self.parallel: self.parallel.release_ready()
             self.log.info("language_route session=%s language=%s mode=%s epoch=%d",
                 session.id[:8],language,session.route_mode,session.route_epoch)
-        session.message = "Telugu detected - original audio" if language == "te-IN" else language + " detected - translating to Telugu"
+        session.message = "Your language detected - original audio" if self.is_target_language(language) else "Translating to your language"
         self.language_segments[identity] = (language,session.route_epoch)
         if len(self.language_segments)>2000: self.language_segments.pop(next(iter(self.language_segments)))
         pending = self.pending_translations.pop(identity,None)
@@ -161,7 +168,7 @@ class Pipeline:
                 if len(self.pending_translations)>128: self.pending_translations.pop(next(iter(self.pending_translations)))
                 return
             language, epoch = segment
-            if language == "te-IN" or not self.current_epoch(epoch): return
+            if self.is_target_language(language) or not self.current_epoch(epoch): return
         else:
             epoch = self.session.route_epoch
         delta = self.finals.accept(item["id"], item["text"])
@@ -176,7 +183,7 @@ class Pipeline:
     def receive_caption(self, data):
         if self.session.stopped.is_set(): return
         try:
-            for item in decode_message(data,self.session.source_uid):
+            for item in decode_message(data,self.session.source_uid,self.session.target_language):
                 if item["kind"] == "source":
                     self.session.source = item["text"]
                     if self.session.source_language == "auto": self.route_source(item)
@@ -217,7 +224,7 @@ class Pipeline:
                 self.engine_epoch = epoch
                 self.engine_chunk += 1
                 self.engine_part = 0
-                self.session.message = 'Listening - preparing Telugu audio'
+                self.session.message = 'Listening - preparing your audio'
                 self.streaming_started = True
                 if self.session.voice_provider == 'agora-engine': self.completion.begin()
                 submitted = time.monotonic()
@@ -235,7 +242,7 @@ class Pipeline:
                 self.log.info('speech_streamed session=%s last_packet=%d generation_ms=%.0f',
                     self.session.id[:8], self.session.audio.next_sequence-1,
                     (time.monotonic()-submitted)*1000)
-            self.session.message = 'Listening - Telugu audio plays in order'
+            self.session.message = 'Listening - Your voice is playing'
 
     async def monitor(self):
         while True:

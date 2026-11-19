@@ -94,7 +94,7 @@ final class LiveTranslation {
         engine = RtcEngine.create(config);
         require(engine.enableAudio(), "enable audio");
         require(engine.enableLocalAudio(false), "disable microphone capture");
-        // RTC uploads captured playback only. Prepared Telugu is played by our own ordered AudioTrack.
+        // RTC uploads captured playback only. Translated speech is played by our own ordered AudioTrack.
         AudioTrackConfig trackConfig = new AudioTrackConfig();
         trackConfig.enableLocalPlayback = false;
         customTrack = engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE, trackConfig);
@@ -108,8 +108,8 @@ final class LiveTranslation {
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
             .setBufferSizeInBytes(Math.max(minimum, 3200)).setTransferMode(AudioTrack.MODE_STREAM).build();
         output.setVolume(0.75f); output.play();
-        playback = new Thread(this::render, "TeluguPlayback"); playback.start();
-        downloading = new Thread(this::downloadAudio, "TeluguPrefetch"); downloading.start();
+        playback = new Thread(this::render, "VoicePlayback"); playback.start();
+        downloading = new Thread(this::downloadAudio, "VoicePrefetch"); downloading.start();
         publishing = new Thread(this::publish, "SourceUpload"); publishing.start();
         ChannelMediaOptions options = new ChannelMediaOptions();
         options.channelProfile = Constants.CHANNEL_PROFILE_LIVE_BROADCASTING;
@@ -133,10 +133,11 @@ final class LiveTranslation {
                 terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
                 terminalMessage = status.optString("message", "Session ended");
             }
-            ProbeState.sourceText = status.optString("source_text");
-            ProbeState.translatedText = status.optString("translated_text");
-            ProbeState.phrases = status.optInt("phrases");
-            ProbeState.message = status.optString("message", "Detecting language");
+            ListeningState.sourceText = status.optString("source_text");
+            ListeningState.translatedText = status.optString("translated_text");
+            ListeningState.phrases = status.optInt("phrases");
+            ListeningState.detectedLanguage = status.optString("detected_language");
+            ListeningState.message = status.optString("message", "Detecting language");
             if (playedSequence > acknowledgedSequence) {
                 int completed = playedSequence;
                 try { backend.audioPlayed(sessionId, completed); acknowledgedSequence = completed; }
@@ -182,7 +183,7 @@ final class LiveTranslation {
                         if (epoch > lastEpoch) { sameChunk = false; nextChunk = part == 1; }
                         if (epoch < lastEpoch) throw new IllegalStateException("Audio language routing is out of order");
                         if ((!sameChunk && !nextChunk) || chunk < 1 || part < 1)
-                            throw new IllegalStateException("Telugu chunk numbering is out of order");
+                            throw new IllegalStateException("Voice chunk numbering is out of order");
                         byte[] pcm = new byte[size]; in.readFully(pcm);
                         prepared.put(new PreparedAudio(sequence, chunk, part, epoch, pcm));
                         after = sequence; downloadedSequence = sequence;
@@ -213,7 +214,7 @@ final class LiveTranslation {
                     // Only a confirmed language change cancels obsolete translated audio.
                     output.pause(); output.flush();
                     if (!ends.isEmpty()) playedSequence = (int)ends.peekLast()[0];
-                    ends.clear(); framesWritten = 0; first = true; ProbeState.playingChunk = 0;
+                    ends.clear(); framesWritten = 0; first = true; ListeningState.playingChunk = 0;
                     listener.routing(wanted.translated); // Applies media volume on the service thread before playback.
                     if (closed.get()) return;
                     output.play(); applied = wanted;
@@ -221,7 +222,7 @@ final class LiveTranslation {
                 long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
                 while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
                     long[] done = ends.removeFirst();
-                    playedSequence = (int)done[0]; ProbeState.playingChunk = (int)done[2];
+                    playedSequence = (int)done[0]; ListeningState.playingChunk = (int)done[2];
                 }
                 if (clip == null) clip = prepared.poll(50, TimeUnit.MILLISECONDS);
                 if (clip == null) {

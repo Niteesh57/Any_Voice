@@ -5,11 +5,13 @@ import time
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from pydantic import BaseModel
 from typing import Literal
 
 from .config import Settings
+from .voices import VoiceCatalog, agora_locale
+from .providers import ProviderError
 from .rtc import native_available
 from .session import Pipeline, Session, token_for
 
@@ -19,12 +21,14 @@ load_dotenv()
 class StartRequest(BaseModel):
     source_language: str = "auto"
     target_language: str = "te-IN"
+    voice_id: str | None = None
     voice_provider: Literal["murf-direct", "agora-engine"] | None = None
 
 
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available):
     settings = settings or Settings.from_env()
     sessions = {}
+    catalog = VoiceCatalog(settings)
     creating = asyncio.Lock()
 
     async def auth(authorization: str = Header(default="")):
@@ -42,11 +46,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.11", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.12", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.11"}
+        return {"service": "Any Voice", "version": "0.12"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -62,19 +66,44 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         missing = settings.missing()
         native = native_check()
         return {"configured": not missing and native, "missing": missing,
-                "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_language": "te-IN",
+                "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_selection": "voice-library",
                 "message": "Ready" if not missing and native else "Configure provider credentials and run the Linux worker"}
+
+    @app.get("/v1/voices", dependencies=[Depends(auth)])
+    async def voices():
+        try: rows=await catalog.get()
+        except ProviderError as exc: raise HTTPException(503,str(exc)) from exc
+        return {"voices":rows,"languages":[{**language,
+            "detection":list(settings.auto_languages if language["agora_locale"] in settings.auto_languages else (*settings.auto_languages[:3],language["agora_locale"]))}
+            for language in catalog.languages]}
+
+    @app.get("/v1/voice-preview", dependencies=[Depends(auth)])
+    async def voice_preview(voice_id: str, language: str):
+        async with creating:
+            if any(s.task and not s.task.done() for s in sessions.values()):
+                raise HTTPException(409,"Stop listening before previewing a voice")
+            if not agora_locale(language): raise HTTPException(422,"Select a supported language")
+            try: audio=await catalog.preview(voice_id,language)
+            except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+            except (ProviderError,asyncio.TimeoutError) as exc: raise HTTPException(502,"Voice preview unavailable. Try again.") from exc
+            return Response(audio,media_type="audio/wav",headers={"Cache-Control":"private, max-age=600"})
 
     @app.post("/v1/sessions", dependencies=[Depends(auth)])
     async def start(request: StartRequest):
-        if request.source_language not in ("auto", "en-IN") or request.target_language != "te-IN":
-            raise HTTPException(422, "Use auto detection or English, with Telugu as the target")
+        if request.source_language not in ("auto", "en-IN") or not agora_locale(request.target_language):
+            raise HTTPException(422, "Select a supported output language")
         try:
             settings.validate()
         except ValueError as exc:
             raise HTTPException(503, str(exc)) from exc
         if not native_check():
             raise HTTPException(503, "Agora worker requires the Linux runtime. Start the Docker backend.")
+        if request.voice_id:
+            try: await catalog.validate(request.voice_id,request.target_language)
+            except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+            except ProviderError as exc: raise HTTPException(503,str(exc)) from exc
+        else:
+            raise HTTPException(422,"Select a voice for this language")
         async with creating:
             for sid, old in list(sessions.items()):
                 if old.stopped.is_set() and time.monotonic() - old.touched > 60:
@@ -83,8 +112,9 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
             session = Session(voice_provider=request.voice_provider or settings.voice_provider,
+                target_language=agora_locale(request.target_language), voice_locale=request.target_language, voice_id=request.voice_id,
                 source_language=request.source_language,
-                source_languages=settings.auto_languages if request.source_language == "auto" else ("en-IN",))
+                source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else ("en-IN",))
             sessions[session.id] = session
             try:
                 pipeline = pipeline_factory(settings, session)

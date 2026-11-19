@@ -12,7 +12,8 @@ class Settings:
     agora_customer_secret: str = ""
     murf_key: str = ""
     public_url: str = ""
-    voice: str = "Jaya"
+    voice: str = ""
+    target_locale: str = "te-IN"
     voice_rate: int = 15
     voice_provider: str = "murf-direct"
     auto_languages: tuple = ("en-IN", "hi-IN", "ta-IN", "te-IN")
@@ -29,7 +30,7 @@ class Settings:
             agora_customer_secret=os.getenv("AGORA_CUSTOMER_SECRET", ""),
             murf_key=os.getenv("MURF_API_KEY", ""),
             public_url=os.getenv("ANYVOICE_PUBLIC_URL", "").rstrip("/"),
-            voice=os.getenv("MURF_VOICE_ID", "Jaya"),
+            voice=os.getenv("MURF_VOICE_ID", ""),
             voice_rate=max(-50, min(50, int(os.getenv("MURF_SPEECH_RATE", "15")))),
             voice_provider=os.getenv("VOICE_PROVIDER", "murf-direct"),
             max_seconds=min(900, max(60, int(os.getenv("MAX_SESSION_SECONDS", "900")))),

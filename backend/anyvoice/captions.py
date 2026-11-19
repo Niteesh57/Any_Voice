@@ -4,7 +4,7 @@ import io
 import json
 
 
-def decode_message(data: bytes, source_uid: int):
+def decode_message(data: bytes, source_uid: int, target_language="te-IN"):
     if len(data) > 65536:
         raise ValueError("Caption message exceeds limit")
     if data.startswith(b"\x1f\x8b"):
@@ -36,7 +36,7 @@ def decode_message(data: bytes, source_uid: int):
         rows = [legacy] if legacy else []
     final_parts = []
     for row in rows:
-        if row.get("language") == "te-IN" and row.get("isFinal") is True:
+        if row.get("language") == target_language and row.get("isFinal") is True:
             texts = row.get("texts", [])
             if not isinstance(texts, list) or any(not isinstance(text, str) for text in texts):
                 raise ValueError("Invalid translated caption texts")

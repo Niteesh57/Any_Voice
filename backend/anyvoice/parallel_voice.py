@@ -104,7 +104,7 @@ class ParallelVoice:
                 raise
             except Exception:
                 # A later failure must not interrupt an earlier voice still being generated.
-                chunk.error = 'Could not generate Telugu chunk %03d. Earlier audio will finish.' % chunk.number
+                chunk.error = 'Could not generate voice chunk %03d. Earlier audio will finish.' % chunk.number
                 chunk.done = True
                 self.release_ready()
 

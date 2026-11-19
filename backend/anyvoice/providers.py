@@ -43,7 +43,7 @@ class AgoraServices:
                 "pubBotToken": self.token(s.stt_uid),
                 "subscribeAudioUids": [str(s.source_uid)], "enableJsonProtocol": True,
             },
-            "translateConfig": {"languages": [{"source": language, "target": ["te-IN"]} for language in s.source_languages if language != "te-IN"]},
+            "translateConfig": {"languages": [{"source": language, "target": [s.target_language]} for language in s.source_languages if language != s.target_language]},
         })
         self.stt_id = result.get("agent_id")
         if not self.stt_id:
@@ -63,11 +63,11 @@ class AgoraServices:
                 "llm": {
                     "vendor": "custom", "url": self.settings.public_url + "/v1/agent/idle/chat/completions",
                     "api_key": self.settings.access_token,
-                    "system_messages": [{"role": "system", "content": "This agent only broadcasts supplied Telugu text."}],
+                    "system_messages": [{"role": "system", "content": "This agent only broadcasts supplied translated text."}],
                 },
                 "tts": {"vendor": "murf", "params": {
                     "api_key": self.settings.murf_key, "base_url": "wss://global.api.murf.ai/v1/speech/stream-input",
-                    "voiceId": self.settings.voice, "locale": "te-IN", "model": "falcon-2.1",
+                    "voiceId": self.settings.voice, "locale": self.settings.target_locale, "model": "falcon-2.1",
                     "rate": self.settings.voice_rate, "pitch": 0, "sample_rate": 24000,
                 }},
                 "turn_detection": {"mode": "default", "config": {

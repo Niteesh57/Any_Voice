@@ -1,0 +1,9 @@
+<resources>
+    <style name="AnyVoiceTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item><item name="android:colorAccent">#1D5C49</item>
+        <item name="android:windowLightStatusBar">true</item><item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">#F6F5EF</item><item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="VoiceSheetAnimation"><item name="android:windowEnterAnimation">@anim/sheet_enter</item><item name="android:windowExitAnimation">@anim/sheet_exit</item></style>
+    <color name="icon_background">#1D5C49</color>
+</resources>

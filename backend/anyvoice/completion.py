@@ -26,7 +26,7 @@ class SpeechCompletion:
             self.last_turn = turn
             if not self.pending: return
             if p.get('end', {}).get('type') != 'ok':
-                self.failure = 'Telugu voice preparation did not complete.'
+                self.failure = 'Voice preparation did not complete.'
             self.pending = False; self.done.set()
         except (ValueError, TypeError, KeyError): return
 
@@ -34,7 +34,7 @@ class SpeechCompletion:
         try:
             await asyncio.wait_for(self.done.wait(), 75)
         except asyncio.TimeoutError as exc:
-            raise ProviderError('Telugu voice preparation timed out.') from exc
+            raise ProviderError('Voice preparation timed out.') from exc
         if self.failure: raise ProviderError(self.failure)
 
     async def open(self):

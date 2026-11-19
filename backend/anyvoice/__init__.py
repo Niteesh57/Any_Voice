@@ -1,1 +1,1 @@
-"""Any Voice: English-to-Telugu streaming worker."""
+"""Any Voice: real-time multilingual voice worker."""

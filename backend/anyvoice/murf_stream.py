@@ -37,7 +37,7 @@ class MurfStream:
             first = True
             try:
                 await self.ws.send(json.dumps({'context_id': context, 'voice_config': {
-                    'voice_id': self.settings.voice, 'locale': 'te-IN',
+                    'voice_id': self.settings.voice, 'locale': self.settings.target_locale,
                     'rate': self.settings.voice_rate, 'pitch': 0}}))
                 await self.ws.send(json.dumps({'text': text, 'context_id': context, 'end': True}))
                 deadline = asyncio.get_running_loop().time() + 90
@@ -48,7 +48,7 @@ class MurfStream:
                     if event.get('context_id') not in (None, context):
                         raise ProviderError('Murf returned audio for an unexpected phrase.')
                     if event.get('error') or event.get('warning_code') == 'NO_VOICE_CONFIG':
-                        raise ProviderError('Murf streaming could not generate this Telugu phrase.')
+                        raise ProviderError('Murf streaming could not generate this phrase.')
                     if event.get('audio'):
                         raw = remainder + base64.b64decode(event['audio'], validate=True)
                         remainder = raw[len(raw)//2*2:]

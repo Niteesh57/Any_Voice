@@ -12,8 +12,10 @@ final class BackendClient {
     private final String base;
     private final String access;
     private final String voiceProvider;
+    private final UserProfile profile;
 
     BackendClient(Context context) {
+        profile = new UserProfile(context);
         SharedPreferences prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE);
         base = prefs.getString("url", BuildConfig.DEFAULT_BACKEND_URL).trim().replaceAll("/+$", "");
         access = prefs.getString("access", "").trim();
@@ -42,7 +44,23 @@ final class BackendClient {
     boolean configured() { return !base.isEmpty() && !access.isEmpty(); }
     JSONObject capabilities() throws Exception { return request("GET", "/v1/capabilities", null); }
     JSONObject start() throws Exception {
-        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", "te-IN").put("voice_provider", voiceProvider));
+        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
+    }
+    JSONObject voices() throws Exception { return request("GET", "/v1/voices", null); }
+    byte[] preview(String voice, String language) throws Exception {
+        validate(base);
+        String query="?voice_id="+URLEncoder.encode(voice,"UTF-8")+"&language="+URLEncoder.encode(language,"UTF-8");
+        HttpURLConnection c=(HttpURLConnection)new URL(base+"/v1/voice-preview"+query).openConnection();
+        c.setInstanceFollowRedirects(false);c.setConnectTimeout(10000);c.setReadTimeout(35000);
+        c.setRequestProperty("Authorization","Bearer "+access);
+        try {
+            if(c.getResponseCode()!=200) throw new IOException("Preview unavailable. Stop listening and try again.");
+            try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()) {
+                byte[] buffer=new byte[8192];int n;
+                while((n=in.read(buffer))!=-1) { if(out.size()+n>700000)throw new IOException("Preview too large");out.write(buffer,0,n); }
+                return out.toByteArray();
+            }
+        } finally { c.disconnect(); }
     }
     JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id, null); }
     void stop(String id) throws Exception { request("POST", "/v1/sessions/" + id + "/stop", new JSONObject()); }
