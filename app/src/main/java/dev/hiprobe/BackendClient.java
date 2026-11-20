@@ -63,8 +63,9 @@ final class BackendClient {
         String context=ListeningState.sourceText+"\n"+ListeningState.translatedText;
         if(context.length()>8000)context=context.substring(context.length()-8000);
         return request("POST", "/v1/sessions",new JSONObject().put("mode","bubble").put("source_language","auto")
-            .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context).put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(this.context).apps()));
+            .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context).put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(this.context).apps()).put("screen_tools",ScreenTools.authorized(this.context)));
     }
+    void cancelResearch(String id) throws Exception{request("POST","/v1/sessions/"+id+"/cancel-research",new JSONObject());}
     JSONObject overview() throws Exception{return request("GET","/v1/me/overview",null);}
     JSONObject tool(String name,JSONObject args) throws Exception{return request("POST","/v1/me/tools",new JSONObject().put("request_id",java.util.UUID.randomUUID().toString()).put("name",name).put("arguments",args));}
     void deviceResult(String id,JSONObject result) throws Exception{request("POST","/v1/me/actions/"+id+"/result",result);}
@@ -84,7 +85,7 @@ final class BackendClient {
             }
         } finally { c.disconnect(); }
     }
-    JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id, null); }
+    JSONObject status(String id) throws Exception { return request("GET", "/v1/sessions/" + id+"?screen_tools="+ScreenTools.authorized(context), null); }
     void stop(String id) throws Exception { request("POST", "/v1/sessions/" + id + "/stop", new JSONObject()); }
     JSONObject audioManifest(String id, int after) throws Exception {
         return request("GET", "/v1/sessions/" + id + "/audio?after=" + after, null);

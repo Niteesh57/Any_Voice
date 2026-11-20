@@ -6,7 +6,7 @@ import time
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 from .config import Settings
@@ -26,6 +26,7 @@ load_dotenv()
 class StartRequest(BaseModel):
     mode: Literal["translation", "bubble"] = "translation"
     timezone: str = Field(default="Asia/Kolkata",max_length=80)
+    screen_tools: bool = False
     device_apps: dict[str,str] = Field(default_factory=dict,max_length=100)
     context: str = Field(default="", max_length=8000)
     source_language: str = "auto"
@@ -35,8 +36,25 @@ class StartRequest(BaseModel):
 
 
 class DeviceResult(BaseModel):
-    status: Literal["launch_requested","browser_requested","unavailable","failed","needs_unlock","execution_unknown"]
+    status: Literal["launch_requested","browser_requested","unavailable","failed","needs_unlock","execution_unknown","observed","scrolled","unchanged","end_reached","restricted","cancelled","screen_changed"]
     detail: str = Field(default="",max_length=300)
+    package_name: str = Field(default="",max_length=200)
+    text: str = Field(default="",max_length=18000)
+    can_scroll: bool = False
+    sensitive: bool = False
+    truncated: bool = False
+    content_hash: str = Field(default="",max_length=80)
+    image_data: str = Field(default="",max_length=400000)
+    captured_at: int = 0
+    @field_validator('image_data')
+    @classmethod
+    def valid_jpeg(cls,value):
+        import base64
+        if value:
+            try:raw=base64.b64decode(value,validate=True)
+            except ValueError:raise ValueError('Invalid screenshot encoding')
+            if not raw.startswith(b'\xff\xd8'):raise ValueError('Screenshot must be JPEG')
+        return value
 
 class ManualTool(BaseModel):
     request_id: str = Field(min_length=8,max_length=100)
@@ -75,11 +93,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.16", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.17", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.16"}
+        return {"service": "Any Voice", "version": "0.17"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -125,6 +143,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         if not session:return {"active":False}
         return {"active":True,"state":session.state,"phase":session.bubble_state,"wake_sequence":session.wake_sequence,
             "input_frames":session.input_frames,"input_rms":session.input_rms,"max_input_rms":session.max_input_rms,
+            "screen_tools":session.screen_tools,"screen_research":session.screen_research,
             "voice_frames":session.audio_frames,"last_audio_sequence":session.audio.next_sequence-1 if session.audio else 0,
             "acknowledged":session.audio.acknowledged if session.audio else 0,"phrases":session.phrases}
 
@@ -156,7 +175,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                     del sessions[sid]
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
-            session = Session(owner=owner,timezone=request.timezone,device_apps=request.device_apps,memory_store=memory,mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
+            session = Session(owner=owner,screen_tools=request.screen_tools,timezone=request.timezone,device_apps=request.device_apps,memory_store=memory,mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
                 target_language=agora_locale(request.target_language), voice_locale=request.target_language, voice_id=request.voice_id,
                 source_language=request.source_language,
                 source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else ("en-IN",))
@@ -183,11 +202,12 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 raise
 
     @app.get("/v1/sessions/{sid}", dependencies=[Depends(auth)])
-    async def status(sid: str,owner: str = Depends(device)):
+    async def status(sid: str,owner: str = Depends(device),screen_tools: bool | None = None):
         session = scoped(sid,owner)
         if not session:
             raise HTTPException(404, "Session not found")
         session.touched = time.monotonic()
+        if owner and session.mode=="bubble" and screen_tools is not None:session.screen_tools=screen_tools
         return {**session.public(),"device_actions":memory.actions(owner) if owner else []}
 
     @app.post("/v1/sessions/{sid}/stop", dependencies=[Depends(auth)])
@@ -253,6 +273,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             raise HTTPException(409, str(exc)) from exc
         return {"acknowledged": session.audio.acknowledged}
 
+    @app.post("/v1/sessions/{sid}/cancel-research",dependencies=[Depends(auth)])
+    async def cancel_research(sid: str,owner: str = Depends(device)):
+        session=scoped(sid,owner);session.cancel_research=True;memory.clear_question(owner)
+        return {"status":"cancelled"}
+
     @app.get("/v1/me/overview",dependencies=[Depends(auth)])
     async def overview(owner: str = Depends(device)):
         if not owner:raise HTTPException(401,"Device identity required")
@@ -267,7 +292,9 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
     @app.post("/v1/me/actions/{action_id}/result",dependencies=[Depends(auth)])
     async def device_result(action_id: str,result: DeviceResult,owner: str = Depends(device)):
         if not owner:raise HTTPException(401,"Device identity required")
-        try:return memory.action_result(owner,action_id,result.model_dump()) or {"status":"pending"}
+        try:
+            memory.action_result(owner,action_id,result.model_dump())
+            return {"status":"received"}
         except ValueError as exc:raise HTTPException(404,str(exc)) from exc
 
     app.state.memory=memory

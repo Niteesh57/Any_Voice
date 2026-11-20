@@ -144,10 +144,12 @@ final class LiveTranslation {
             if(bubble){
                 JSONArray actions=status.optJSONArray("device_actions");
                 if(actions!=null)for(int i=0;i<actions.length();i++){
+                    if(closed.get())return;
                     JSONObject action=actions.getJSONObject(i);
                     JSONObject result=new DeviceTools(context).run(action);
                     try{backend.deviceResult(action.getString("id"),result);}catch(Exception ignored){} // Stored receipt is retried, never re-executed.
                 }
+                if(!status.optBoolean("screen_research"))ScreenTools.clearResults();
                 listener.status(status);
             }
             else {
@@ -280,6 +282,7 @@ final class LiveTranslation {
         String id = sessionId;
         if (id != null) { try { backend.stop(id); } catch (Exception ignored) { /* Backend lease expires if unreachable. */ } }
     }
+    void cancelResearch(){String id=sessionId;if(id!=null)new Thread(()->{try{backend.cancelResearch(id);}catch(Exception ignored){}},"CancelResearch").start();}
     void close() {
         if (!closed.compareAndSet(false, true)) return;
         stopping = true;

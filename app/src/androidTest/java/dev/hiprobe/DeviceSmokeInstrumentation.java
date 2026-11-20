@@ -9,12 +9,36 @@ import org.json.JSONObject;
 
 /** Opt-in on-device checks. Uses a separate test identity, never the user's memory. */
 public final class DeviceSmokeInstrumentation extends Instrumentation {
-    private String requestedApp;
-    @Override public void onCreate(Bundle args){super.onCreate(args);requestedApp=args==null?null:args.getString("app");start();}
+    private String requestedApp,requestedMode;
+    @Override public void onCreate(Bundle args){super.onCreate(args);requestedApp=args==null?null:args.getString("app");requestedMode=args==null?null:args.getString("mode");start();}
     @Override public void onStart(){
         Bundle results=new Bundle();
         try{
             Context real=getTargetContext();
+            if("screen".equals(requestedMode)){
+                long deadline=android.os.SystemClock.elapsedRealtime()+120000;
+                while(ScreenAccessService.connected==null&&android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(200);
+                if(!ScreenTools.enabled(real))throw new AssertionError("User must enable Screen assist first");
+                real.startActivity(new android.content.Intent().setComponent(new android.content.ComponentName("dev.hiprobe.testsource","dev.hiprobe.testsource.ResearchFixtureActivity")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK|android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK));
+                Thread.sleep(2000);
+                String scope=java.util.UUID.randomUUID().toString().replace("-","");org.json.JSONArray pages=new org.json.JSONArray();String hash="";
+                for(int i=0;i<3;i++){
+                    JSONObject args=new JSONObject().put("_scope",scope).put("expected_package","dev.hiprobe.testsource").put("previous_hash",hash).put("direction","down");
+                    JSONObject page=new DeviceTools(real).run(new JSONObject().put("id",scope+":"+i).put("name",i==0?"read_screen":"scroll_screen").put("arguments",args));
+                    if(i>0&&page.optString("status").equals("end_reached"))break;
+                    pages.put(page);
+                    try(java.io.FileOutputStream out=real.openFileOutput("screen-fixture-observations.json",Context.MODE_PRIVATE)){out.write(pages.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+                    if(!page.optString("status").equals(i==0?"observed":"scrolled"))throw new AssertionError("Screen operation at page "+i+": "+page.optString("status")+" "+page.optString("detail"));
+                    if(page.optString("image_data").isEmpty())throw new AssertionError("No screenshot available");
+                    if(!page.optString("package_name").equals("dev.hiprobe.testsource"))throw new AssertionError("Wrong foreground app");
+                    hash=page.optString("content_hash");
+                }
+                try(java.io.FileOutputStream out=real.openFileOutput("screen-fixture-observations.json",Context.MODE_PRIVATE)){out.write(pages.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+                String collected=pages.toString();if(!collected.contains("Course A")||!collected.contains("Course B")||!collected.contains("Course C"))throw new AssertionError("Fixture coverage incomplete");
+                ScreenTools.cancel();JSONObject cancelled=ScreenTools.execute(real,new JSONObject().put("name","read_screen").put("arguments",new JSONObject().put("_scope",scope)));
+                if(!cancelled.optString("status").equals("cancelled"))throw new AssertionError("Screen cancel failed");
+                results.putString("screen_read_scroll_screenshot_cancel","PASS: "+pages.length()+" fixture viewports");finish(-1,results);return;
+            }
             if(requestedApp!=null){
                 JSONObject launch=new DeviceTools(real).run(new JSONObject().put("id",java.util.UUID.randomUUID().toString().replace("-","")+":0").put("name","open_app").put("arguments",new JSONObject().put("app",requestedApp)));
                 results.putString("open_app",launch.toString());finish(-1,results);return;

@@ -14,7 +14,7 @@ final class FloatingControl {
     private final Runnable stop;
     private final boolean bubble;
     private Runnable ask;
-    private TextView askButton;
+    private TextView askButton,cancelResearch;
     private long lastWake;
     private final WindowManager windows;
     private WindowManager.LayoutParams layout;
@@ -33,6 +33,7 @@ final class FloatingControl {
         details=new LinearLayout(context);details.setOrientation(LinearLayout.VERTICAL);details.setPadding(dp(18),0,dp(18),dp(16));details.setVisibility(View.GONE);panel.addView(details);
         text(details,bubble?"bubble":"any voice",19,0xfff6f5ef);state=text(details,"Listening",12,0xffd9edb5);caption=text(details,"",13,0xffd4e1d7);caption.setMaxLines(3);caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
         if(ask!=null){askButton=text(details,"Ask Bubble",15,0xffd9edb5);askButton.setMinHeight(dp(48));askButton.setGravity(Gravity.CENTER);askButton.setBackground(shape(0xff295f4d,14));askButton.setContentDescription("Ask Bubble. Temporarily switch from media to conversation.");askButton.setOnClickListener(v->{if(ask!=null)ask.run();});}
+        if(ask!=null){cancelResearch=text(details,"Stop screen research",14,0xffd9edb5);cancelResearch.setMinHeight(dp(44));cancelResearch.setGravity(Gravity.CENTER);cancelResearch.setVisibility(View.GONE);cancelResearch.setOnClickListener(v->ListeningService.cancelScreen());}
         TextView open=text(details,"Open app  ↗",13,Color.WHITE);open.setMinHeight(dp(44));open.setGravity(Gravity.CENTER_VERTICAL);open.setOnClickListener(v->{context.startActivity(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));collapse();});
         TextView end=text(details,ask!=null?"Disable":bubble?"Disable Bubble":"Stop listening",14,0xff183c35);end.setGravity(Gravity.CENTER);end.setMinHeight(dp(46));end.setBackground(shape(0xffd9edb5,14));end.setOnClickListener(v->stop.run());
         layout=new WindowManager.LayoutParams(dp(52),dp(52),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);
@@ -64,12 +65,13 @@ final class FloatingControl {
     void update(){
         if(panel==null)return;logo.active(bubble?BubbleState.active:ListeningState.running);
         if(ask!=null){
-            if(expanded){askButton.setText(ListeningState.manualConversation?"Return to automatic":"Ask Bubble");state.setText(BubbleState.active?BubbleState.message:ListeningState.message);String value=BubbleState.active?BubbleState.reply:ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Automatically follows app audio and your questions.":value);}
+            if(expanded){if(cancelResearch!=null){cancelResearch.setText(BubbleState.waitingForReply?"Cancel question":"Stop screen research");cancelResearch.setVisibility(BubbleState.screenBusy||BubbleState.waitingForReply?View.VISIBLE:View.GONE);}askButton.setText(ListeningState.manualConversation?"Return to automatic":"Ask Bubble");state.setText(BubbleState.active?BubbleState.message:ListeningState.message);String value=BubbleState.active?BubbleState.reply:ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Automatically follows app audio and your questions.":value);}
         }else if(bubble){
             if(expanded){if(askButton!=null)askButton.setText(BubbleState.active?"End conversation":"Ask Bubble");state.setText(BubbleState.message);String value=BubbleState.reply.isEmpty()?BubbleState.heard:BubbleState.reply;caption.setText(value.isEmpty()?"Tap Ask Bubble, speak, then pause for an answer.":value);}
         }else if(expanded){UserProfile profile=new UserProfile(context);state.setText(ListeningState.replacing?"Translating · "+profile.languageName():ListeningState.detectedLanguage.isEmpty()?"Finding the language":"Original voice · "+profile.languageName());String value=ListeningState.replacing?ListeningState.translatedText:ListeningState.sourceText;caption.setText(value.isEmpty()?"Your audio, in your language.":value);}
     }
 
+    void visible(boolean value){if(panel!=null)panel.setVisibility(value?View.VISIBLE:View.INVISIBLE);}
     void reposition(){if(panel!=null)applySize();}
     private void snapToEdge(){
         int target=layout.x+dp(26)<width()/2?dp(4):width()-dp(56);

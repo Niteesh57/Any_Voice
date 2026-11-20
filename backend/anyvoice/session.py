@@ -45,6 +45,9 @@ class Session:
     mode: str = "translation"
     bubble_state: str = "standby"
     wake_sequence: int = 0
+    screen_tools: bool = False
+    screen_research: bool = False
+    cancel_research: bool = False
     owner: str = ""
     timezone: str = "Asia/Kolkata"
     device_apps: dict = field(default_factory=dict)
@@ -56,6 +59,8 @@ class Session:
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
+                "screen_research": self.screen_research,
+                "waiting_for_user": bool(self.owner and self.memory_store and (self.memory_store.question(self.owner) or {}).get("state")=="pending"),
                 "mode": self.mode, "bubble_state": self.bubble_state, "wake_sequence": self.wake_sequence,
                 "input_allowed": self.mode == "bubble" and self.bubble_state in ("standby", "listening"),
                 "source_text": self.source, "translated_text": self.translated,

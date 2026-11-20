@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private UserProfile profile;
     private OutputVolume voiceVolume;
     private LinearLayout body;
-    private TextView stateLabel,source,translated,startLabel,voiceSummary,languageTitle;
+    private TextView stateLabel,source,translated,startLabel,voiceSummary,languageTitle,screenStatus;
     private BrandView wave;
     private boolean checking,resumed;
     private JSONObject catalog;
@@ -52,6 +52,7 @@ public final class MainActivity extends Activity {
             updateText(source,ListeningState.sourceText.isEmpty()?"Your original speech appears here.":ListeningState.sourceText);
             updateText(translated,ListeningState.translatedText.isEmpty()?"Your translation appears here.":ListeningState.translatedText);
         }
+        if(screenStatus!=null)updateText(screenStatus,ScreenTools.state(MainActivity.this));
         handler.postDelayed(this,350);
     }};
     @Override public void onCreate(Bundle saved){
@@ -128,6 +129,8 @@ public final class MainActivity extends Activity {
         label(fi,"Always within reach",15,INK,600);label(fi,Settings.canDrawOverlays(this)?"Drag the bubble. Tap for controls.":"Enable your floating shortcut",12,MUTED,400);
         label(fr,"↗",23,GREEN,400);floating.setOnClickListener(v->{if(!Settings.canDrawOverlays(this))startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));else toast("Your single floating bubble appears when Any Voice is enabled.");});
         space(root,14);
+        action(root,"Screen assist  →",0xffedf2e3,GREEN,v->screenAssist());
+        screenStatus=label(root,"Checking screen access",12,MUTED,400);space(root,8);
         action(root,"Tasks & memory  →",0xffedf2e3,GREEN,v->openMemory());space(root,12);
         label(root,"One bubble. Two ways to listen.",20,INK,700);
         label(root,"App audio takes priority for translation. After a quiet period, Bubble listens for your questions. Tap Ask Bubble in the floating controls to ask over a video.",13,MUTED,400);
@@ -139,6 +142,15 @@ public final class MainActivity extends Activity {
         label(transcript,profile.languageName().toUpperCase(Locale.ROOT),10,GREEN,700);translated=label(transcript,"Your translation appears here.",16,INK,500);
         transcriptToggle.setOnClickListener(v->{boolean hidden=transcript.getVisibility()==View.GONE;transcript.setVisibility(hidden?View.VISIBLE:View.GONE);transcriptToggle.setText(hidden?"Live transcript   ⌃":"Live transcript   ⌄");if(hidden)enter(transcript);});
         label(root,"Already in your language? Hear the original voice.\nMedia translation uses app audio. Bubble uses your microphone only when enabled.",12,MUTED,400);space(root,24);hackathon(root);enter(root);
+    }
+    private void screenAssist(){
+        boolean enabled=ScreenTools.enabled(MainActivity.this);
+        boolean authorized=ScreenTools.authorized(MainActivity.this);
+        new AlertDialog.Builder(this).setTitle(enabled?"Screen assist is ready":authorized?"Screen assist is reconnecting":"Screen assist setup")
+            .setMessage("When you ask about the current screen, Bubble sends visible app text and a screenshot to its cloud AI. It can scroll up to three times to compare results. Screens are not collected in the background or saved as memories automatically. Password fields and Android-protected screenshots are withheld.\n\nAndroid accessibility access is needed for reading and scrolling. No tapping, typing, purchases or messages are enabled.")
+            .setNegativeButton(authorized?"Android settings":"Cancel",(d,w)->{if(authorized)startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));})
+            .setNeutralButton("Turn off",(d,w)->{ScreenTools.setEnabled(this,false);toast("Screen assist off");})
+            .setPositiveButton(authorized?"Done":"Enable screen assist",(d,w)->{ScreenTools.setEnabled(this,true);if(!authorized)startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));}).show();
     }
     private void openMemory(){
         network.execute(()->{try{JSONObject data=new BackendClient(this).overview();handler.post(()->{if(isFinishing())return;

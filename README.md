@@ -2,6 +2,8 @@
 
 Hear app audio in the language you choose. A native Android hackathon app built for **Build with Agora — Bengaluru 2026**, organized by Agora and powered by KNOTiC.
 
+Version 0.17 adds [on-demand screen reading, bounded scrolling, visual comparison and clarification](docs/screen-assist.md).
+
 Version 0.16 adds [persistent Bubble memory, task tools and native app/YouTube actions](docs/memory-tools.md).
 
 ## App experience

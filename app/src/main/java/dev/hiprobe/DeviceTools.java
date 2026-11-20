@@ -24,6 +24,8 @@ final class DeviceTools {
         return apps;
     }
     JSONObject run(JSONObject action){
+        if(action.optString("name").equals("read_screen"))return ScreenTools.execute(context,action);
+        if(action.optString("name").equals("scroll_screen"))return scrollOnce(action);
         String id=action.optString("id");if(!id.matches("[a-f0-9]{32}:[0-9:]+"))return result("failed","Invalid action ID");
         android.content.SharedPreferences ledger=context.getSharedPreferences("device_action_results",Context.MODE_PRIVATE);
         String saved=ledger.getString(id,null);
@@ -36,6 +38,17 @@ final class DeviceTools {
         android.content.SharedPreferences.Editor edit=ledger.edit().putString(id,outcome.toString());
         if(ledger.getAll().size()>128){int count=0;for(String key:ledger.getAll().keySet())if(!key.equals(id)&&count++<32)edit.remove(key);}
         edit.commit();return outcome;
+    }
+    private JSONObject scrollOnce(JSONObject action){
+        String id=action.optString("id");if(!id.matches("[a-f0-9]{32}:[0-9:]+"))return result("failed","Invalid action ID");
+        if(!ScreenTools.authorized(context))return result("unavailable","Screen assist is off in Android or Any Voice");
+        if(context.getSystemService(KeyguardManager.class).isKeyguardLocked())return result("needs_unlock","Unlock before scrolling");
+        android.content.SharedPreferences receipts=context.getSharedPreferences("screen_action_receipts",Context.MODE_PRIVATE);
+        if(receipts.contains(id)){JSONObject cached=ScreenTools.cached(id);return cached!=null?cached:result("execution_unknown","This scroll may already have run. Inspect the screen again; it will not be repeated");}
+        if(!receipts.edit().putBoolean(id,true).commit())return result("failed","Could not record scroll receipt");
+        JSONObject result=ScreenTools.execute(context,action);ScreenTools.cache(id,result);
+        if(receipts.getAll().size()>128){android.content.SharedPreferences.Editor edit=receipts.edit();int removed=0;for(String key:receipts.getAll().keySet())if(!key.equals(id)&&removed++<32)edit.remove(key);edit.commit();}
+        return result;
     }
     private JSONObject launch(JSONObject action){
         if(context.getSystemService(KeyguardManager.class).isKeyguardLocked())return result("needs_unlock","Unlock the phone and ask again");

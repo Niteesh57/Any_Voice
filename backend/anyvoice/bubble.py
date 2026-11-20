@@ -51,7 +51,7 @@ class BubblePipeline(Pipeline):
   session.route_mode="translated";session.bubble_state="listening"
   self.qwen=qwen or QwenAudio(self.settings,session.target_language,session.context)
   if session.owner and session.memory_store and not qwen:
-   self.qwen.use_memory(session.memory_store,session.owner,session.timezone,session.device_apps)
+   self.qwen.use_memory(session.memory_store,session.owner,session.timezone,session.device_apps,session.screen_tools,session)
   self.rtc.on_input_pcm=self.receive_input_pcm
   self.vad=CommandVad();self.answer_task=None;self.listening_deadline=0
   self.generation_done=False;self.response_end=0;self.ignore_until=0;self.response_chunks=asyncio.Queue();self.voice_last_packet=0

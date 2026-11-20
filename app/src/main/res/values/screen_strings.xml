@@ -1,0 +1,4 @@
+<resources>
+    <string name="screen_assist_name">Any Voice screen assist</string>
+    <string name="screen_assist_description">When you ask Bubble about the current screen, Any Voice reads visible app text and takes a screenshot to explain it using its cloud AI. It can scroll to compare more results. It does not collect screens in the background, click buttons, type, place orders or send messages. Enable Screen assist inside Any Voice as well. You can turn this service off at any time.</string>
+</resources>

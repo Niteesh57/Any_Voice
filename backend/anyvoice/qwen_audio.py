@@ -12,9 +12,9 @@ class QwenAudio:
  def __init__(self,settings,language,context="",client=None):
   self.settings=settings;self.language=language;self.context=context[:8000];self.history=[]
   self.client=client or httpx.AsyncClient(timeout=httpx.Timeout(45,connect=10))
- def use_memory(self,store,owner,zone,apps):
+ def use_memory(self,store,owner,zone,apps,screen_enabled=False,session=None):
   from .agent import MemoryAgent
-  self.agent=MemoryAgent(self,store,owner,zone,apps)
+  self.agent=MemoryAgent(self,store,owner,zone,apps,screen_enabled,session)
  def configured(self):
   value=urlparse(self.settings.bubble_llm_url)
   return bool(self.settings.dashscope_key and self.settings.bubble_llm_model and value.scheme=="https" and value.netloc and not value.username and not value.password)
@@ -59,4 +59,6 @@ class QwenAudio:
   except ProviderError:raise
   except Exception as exc:raise ProviderError("Bubble's Qwen connection failed.") from exc
  async def close(self):
+  if hasattr(self,"agent"):
+   self.agent.store.cancel_actions(self.agent.owner);self.agent.store.clear_screen_results(self.agent.owner)
   self.history.clear();await self.client.aclose()

@@ -120,5 +120,9 @@ class MemoryApiTests(unittest.IsolatedAsyncioTestCase):
    app.state.sessions['scoped-session']=Session(owner=OWNER)
    self.assertEqual((await c.get('/v1/sessions/scoped-session',headers=other)).status_code,404)
    self.assertEqual((await c.get('/v1/sessions/scoped-session',headers=headers)).status_code,200)
+   app.state.sessions['scoped-session'].mode='bubble'
+   self.assertFalse(app.state.sessions['scoped-session'].screen_tools)
+   self.assertEqual((await c.get('/v1/sessions/scoped-session?screen_tools=true',headers=headers)).status_code,200)
+   self.assertTrue(app.state.sessions['scoped-session'].screen_tools)
    self.assertEqual((await c.get('/v1/me/overview',headers={**headers,'X-AnyVoice-Device-Key':'b'*64})).status_code,401)
    self.assertEqual((await c.post('/v1/me/tools',headers=headers,json={'request_id':'bad-tool-1','name':'shell','arguments':{}})).status_code,422)

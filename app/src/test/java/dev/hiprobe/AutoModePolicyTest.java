@@ -24,6 +24,9 @@ public final class AutoModePolicyTest {
         AutoModePolicy clicks=new AutoModePolicy();
         for(long t=0;t<12000;t+=20)clicks.observe(t%1000==0?-10:-96,t);
         check(!clicks.wantsMedia(12000),"Separated clicks must not accumulate into speech");
+        p.holdConversation(true);check(!p.wantsMedia(50000),"Pending clarification must hold conversation past override timeout");
+        check(p.microphoneAllowed(50000),"Pending clarification must accept the user's answer");
+        p.holdConversation(false);check(p.wantsMedia(50000),"Clearing clarification must restore media priority");
         System.out.println("Automatic mode timing: all scenarios passed");
     }
 }

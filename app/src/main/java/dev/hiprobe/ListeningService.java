@@ -11,6 +11,9 @@ import java.util.ArrayDeque;
 
 /** One user-enabled capture owner, one floating panel and one cloud input at a time. */
 public final class ListeningService extends Service {
+    private static volatile ListeningService current;
+    static void screenOverlay(boolean show){ListeningService service=current;if(service!=null&&service.floating!=null)service.floating.visible(show);}
+    static void cancelScreen(){ScreenTools.cancel();ListeningService service=current;if(service!=null&&service.connection!=null)service.connection.cancelResearch();}
     static final String START="dev.hiprobe.START",STOP="dev.hiprobe.STOP",ASK="dev.hiprobe.ASK";
     private static final String CHANNEL="probe";
     private final Handler main=new Handler(Looper.getMainLooper());
@@ -32,7 +35,7 @@ public final class ListeningService extends Service {
     private final MediaProjection.Callback projectionCallback=new MediaProjection.Callback(){public void onStop(){finish("Android ended audio capture. Enable Any Voice again.");}};
     private final BroadcastReceiver screen=new BroadcastReceiver(){public void onReceive(Context c,Intent i){if(Intent.ACTION_SCREEN_OFF.equals(i.getAction())&&!mediaMode)closeConnection();}};
     @Override public void onCreate(){
-        super.onCreate();volume=new VolumeGuard(this);
+        super.onCreate();current=this;volume=new VolumeGuard(this);
         getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(CHANNEL,"Any Voice",NotificationManager.IMPORTANCE_LOW));
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_USER_PRESENT);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
@@ -113,7 +116,7 @@ public final class ListeningService extends Service {
                 }
                 public void failed(String message){main.post(()->{if(generation==attempt&&capturing)finish(message);});}
                 public void status(JSONObject data){if(media||generation!=attempt||!capturing)return;
-                    BubbleState.phase=data.optString("bubble_state");BubbleState.message=data.optString("message");BubbleState.reply=data.optString("translated_text");BubbleState.heard=data.optString("source_text");BubbleState.inputAllowed=data.optBoolean("input_allowed");
+                    BubbleState.phase=data.optString("bubble_state");BubbleState.message=data.optString("message");BubbleState.reply=data.optString("translated_text");BubbleState.heard=data.optString("source_text");BubbleState.inputAllowed=data.optBoolean("input_allowed");BubbleState.waitingForReply=data.optBoolean("waiting_for_user");BubbleState.screenBusy=data.optBoolean("screen_research");
                     ListeningState.message=BubbleState.message;
                     if("speaking".equals(BubbleState.phase))hadAnswer=true;
                 }
@@ -132,7 +135,7 @@ public final class ListeningService extends Service {
     private void setReplacement(boolean enabled){if(enabled)volume.mute();else volume.restore();ListeningState.replacing=enabled;}
     private final Runnable tick=new Runnable(){public void run(){
         if(!capturing)return;
-        long now=SystemClock.elapsedRealtime();boolean wanted,forced;synchronized(policy){wanted=policy.wantsMedia(now);forced=policy.forced(now);}
+        long now=SystemClock.elapsedRealtime();boolean wanted,forced;synchronized(policy){policy.holdConversation(BubbleState.waitingForReply||!mediaMode&&("thinking".equals(BubbleState.phase)||"speaking".equals(BubbleState.phase)));wanted=policy.wantsMedia(now);forced=policy.forced(now);}
         ListeningState.manualConversation=forced;
         boolean locked=!unlocked();
         if(locked&&!mediaMode&&connection!=null)closeConnection();
@@ -162,14 +165,14 @@ public final class ListeningService extends Service {
     private void notifyState(){if(!notified.equals(ListeningState.message)){notified=ListeningState.message;getSystemService(NotificationManager.class).notify(1,notification());}}
     private void finish(String message){ListeningState.message=message;cleanup();stopSelf();}
     private void cleanup(){
-        capturing=false;ListeningState.running=false;ListeningState.manualConversation=false;BubbleState.enabled=false;BubbleState.translationPending=false;
+        ScreenTools.cancel();capturing=false;ListeningState.running=false;ListeningState.manualConversation=false;BubbleState.enabled=false;BubbleState.translationPending=false;BubbleState.waitingForReply=false;BubbleState.screenBusy=false;
         closeConnection();main.removeCallbacksAndMessages(null);
         if(recorder!=null){try{recorder.stop();}catch(RuntimeException ignored){}if(captureThread!=null)try{captureThread.join(1000);}catch(InterruptedException e){Thread.currentThread().interrupt();}recorder.release();recorder=null;}captureThread=null;
         synchronized(mediaBuffer){mediaBuffer.clear();}
         if(projection!=null){projection.unregisterCallback(projectionCallback);projection.stop();projection=null;}
         if(floating!=null){floating.close();floating=null;}ListeningState.db=-96;stopForeground(STOP_FOREGROUND_REMOVE);
     }
-    @Override public void onDestroy(){cleanup();try{unregisterReceiver(screen);}catch(IllegalArgumentException ignored){}super.onDestroy();}
+    @Override public void onDestroy(){if(current==this)current=null;cleanup();try{unregisterReceiver(screen);}catch(IllegalArgumentException ignored){}super.onDestroy();}
     @Override public void onTaskRemoved(Intent root){finish("Disabled. Original audio restored.");super.onTaskRemoved(root);}
     @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);if(floating!=null)floating.reposition();}
     @Override public IBinder onBind(Intent intent){return null;}
