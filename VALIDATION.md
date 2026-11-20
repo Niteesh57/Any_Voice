@@ -153,3 +153,12 @@ Debug follow-up: UI hierarchy inspection itself temporarily suppressed accessibi
 - A separate real-model test recalled an earlier Maggi session despite a newer C++ session. These use synthetic audio and isolated test memory, not the user's history.
 - Updated Docker and installed 0.18 on OnePlus. A fresh user-driven Android media-to-microphone switch still needs a listening check; the full native server pipeline was tested separately.
 
+# 0.19 non-interruptible handoffs and retained sessions — 2026-11-20
+
+- 66 backend tests passed. Coverage includes source-language flapping without queue invalidation, confirmed target-route changes, playback-end metadata surviving early ACK, source/microphone isolation, pending-caption quiet interval, generation/actual-playback drain and identity reuse. Updated a fragile 30 ms worker scheduling assertion to wait for its actual state with a bounded timeout.
+- Android debug build, test build and lint passed.
+- On OnePlus, native instrumentation used generated cooking audio and a generated question with a separate installation identity. Agora translated media, direct Falcon played it, Qwen recalled the captured recipe, and Agora Conversational AI Engine/Murf spoke the Telugu answer. Media → Bubble → media retained session `d0c41838` throughout. No physical microphone audio was needed for this synthetic regression.
+- Backend handoffs: media to Bubble at packet 217 with ACK 217; back to media at packet 527 with ACK 527. Android logs likewise show handoffs at completed chunk 5 / played 217 / boundary 217, then chunk 7 / played 527 / boundary 527. The answer correctly included water, noodles, masala, two minutes and no onions, qualified as the captured portion only.
+- Subsequent small fixes preserve completed-chunk markers when playback ACK precedes synthesis finalization, hold an explicit Ask request through long drains, and keep original media muted during fresh detection. Backend tests cover the ACK race; Android build/lint verifies final client edits.
+- Rollback: `anyvoice-before-noninterruptible-routing`, `dist/AnyVoice-rollback-before-noninterruptible.apk`, `anyvoice-backend:rollback-before-noninterruptible`.
+

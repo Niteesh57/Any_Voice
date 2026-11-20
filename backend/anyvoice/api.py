@@ -15,6 +15,7 @@ from .providers import ProviderError
 from .rtc import native_available
 from .session import Pipeline, Session, token_for
 from .bubble import BubblePipeline
+from .unified import UnifiedPipeline
 from .qwen_audio import QwenAudio
 from .memory import MemoryStore
 from .tools import validate as validate_tool
@@ -24,7 +25,8 @@ load_dotenv()
 
 
 class StartRequest(BaseModel):
-    mode: Literal["translation", "bubble"] = "translation"
+    mode: Literal["translation", "bubble", "unified"] = "translation"
+    input_mode: Literal["media","bubble"] = "media"
     timezone: str = Field(default="Asia/Kolkata",max_length=80)
     screen_tools: bool = False
     device_apps: dict[str,str] = Field(default_factory=dict,max_length=512)
@@ -61,6 +63,9 @@ class ManualTool(BaseModel):
     name: Literal["task_create","task_update","task_complete","task_reopen","task_list","memory_save","memory_search","media_recall","memory_forget"]
     arguments: dict
 
+class InputRequest(BaseModel):
+    mode: Literal['media','bubble']
+
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available, bubble_factory=BubblePipeline):
     settings = settings or Settings.from_env()
     sessions = {}
@@ -93,11 +98,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.18", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.19", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.18"}
+        return {"service": "Any Voice", "version": "0.19"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -139,7 +144,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
 
     @app.get("/v1/bubble/diagnostics", dependencies=[Depends(auth)])
     async def bubble_diagnostics(owner: str = Depends(device)):
-        session=next((s for s in sessions.values() if s.owner==owner and s.mode=="bubble" and s.task and not s.task.done()),None)
+        session=next((s for s in sessions.values() if s.owner==owner and s.mode in ("bubble","unified") and s.task and not s.task.done()),None)
         if not session:return {"active":False}
         return {"active":True,"state":session.state,"phase":session.bubble_state,"wake_sequence":session.wake_sequence,
             "input_frames":session.input_frames,"input_rms":session.input_rms,"max_input_rms":session.max_input_rms,
@@ -152,7 +157,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         try:ZoneInfo(request.timezone)
         except (ZoneInfoNotFoundError,ValueError):raise HTTPException(422,"Choose a valid timezone")
         if any(len(k)>200 or len(v)>100 for k,v in request.device_apps.items()):raise HTTPException(422,"Invalid app capabilities")
-        if request.mode == "bubble" and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
+        if request.mode in ("bubble","unified") and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
             raise HTTPException(503,"Configure Bubble Qwen credentials on the backend")
         if request.source_language not in ("auto", "en-IN") or not agora_locale(request.target_language):
             raise HTTPException(422, "Select a supported output language")
@@ -182,8 +187,10 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             if request.mode == "bubble":
                 session.source_languages=("en-IN",)  # Command audio goes directly to Qwen, without an STT bot.
             sessions[session.id] = session
+            session.input_mode=request.input_mode;session.desired_input=request.input_mode
             try:
-                pipeline = (bubble_factory if request.mode == "bubble" else pipeline_factory)(settings, session)
+                pipeline = (UnifiedPipeline if request.mode=='unified' else bubble_factory if request.mode == "bubble" else pipeline_factory)(settings, session)
+                session.pipeline=pipeline
                 session.task = asyncio.create_task(pipeline.run())
                 await asyncio.wait_for(session.ready.wait(), timeout=75)
                 if session.state != "ready":
@@ -191,6 +198,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 return {**session.public(), "app_id": settings.agora_app_id,
                         "channel": session.channel, "uid": session.source_uid, "worker_uid": session.worker_uid,
                         "token": token_for(settings, session, session.source_uid),
+                        "microphone_uid":session.microphone_uid,
+                        "microphone_token":token_for(settings,session,session.microphone_uid) if session.mode=='unified' else '',
                         "max_seconds": settings.max_seconds}
             except BaseException as exc:
                 session.stopped.set()
@@ -207,8 +216,14 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         if not session:
             raise HTTPException(404, "Session not found")
         session.touched = time.monotonic()
-        if owner and session.mode=="bubble" and screen_tools is not None:session.screen_tools=screen_tools
+        if owner and session.mode in ("bubble","unified") and screen_tools is not None:session.screen_tools=screen_tools
         return {**session.public(),"device_actions":memory.actions(owner) if owner else []}
+
+    @app.post('/v1/sessions/{sid}/input',dependencies=[Depends(auth)])
+    async def input_mode(sid:str,request:InputRequest,owner:str=Depends(device)):
+        session=scoped(sid,owner)
+        if session.mode!='unified' or session.stopped.is_set():raise HTTPException(409,'Unified session is not active')
+        session.pipeline.request_input(request.mode);return session.public()
 
     @app.post("/v1/sessions/{sid}/stop", dependencies=[Depends(auth)])
     async def stop(sid: str,owner: str = Depends(device)):

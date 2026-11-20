@@ -24,6 +24,7 @@ public final class ListeningService extends Service {
     private volatile boolean capturing,micCapturing;
     private volatile LiveTranslation connection;
     private volatile boolean mediaMode,joined;
+    private volatile boolean requestedMedia;
     private volatile long attempt;
     private FloatingControl floating;
     private long enabledAt,modeSince;
@@ -31,7 +32,7 @@ public final class ListeningService extends Service {
     private String notified="";
     private volatile boolean hadAnswer;
     private final MediaProjection.Callback projectionCallback=new MediaProjection.Callback(){public void onStop(){finish("Android ended audio capture. Enable Any Voice again.");}};
-    private final BroadcastReceiver screen=new BroadcastReceiver(){public void onReceive(Context c,Intent i){if(Intent.ACTION_SCREEN_OFF.equals(i.getAction())&&!mediaMode)closeConnection();}};
+    private final BroadcastReceiver screen=new BroadcastReceiver(){public void onReceive(Context c,Intent i){if(Intent.ACTION_SCREEN_OFF.equals(i.getAction()))stopMicrophone();}};
     @Override public void onCreate(){
         super.onCreate();current=this;volume=new VolumeGuard(this);
         getSystemService(NotificationManager.class).createNotificationChannel(new NotificationChannel(CHANNEL,"Any Voice",NotificationManager.IMPORTANCE_LOW));
@@ -69,7 +70,7 @@ public final class ListeningService extends Service {
     private static AudioFormat format(){return new AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build();}
     private boolean unlocked(){return getSystemService(PowerManager.class).isInteractive()&&!getSystemService(KeyguardManager.class).isKeyguardLocked();}
     private void readMedia(){
-        short[] samples=new short[320];
+        short[] samples=new short[320],silence=new short[320];
         try{while(capturing){int count=recorder.read(samples,0,samples.length,AudioRecord.READ_BLOCKING);if(!capturing)break;if(count<0)throw new IllegalStateException("App audio read failed");if(count==0)continue;
             double energy=0;for(int i=0;i<count;i++)energy+=(double)samples[i]*samples[i];double rms=Math.sqrt(energy/count)/32768.;double db=rms>0?Math.max(-96,20*Math.log10(rms)):-96;
             long now=SystemClock.elapsedRealtime();synchronized(policy){policy.observe(db,now);}
@@ -78,7 +79,7 @@ public final class ListeningService extends Service {
             // Replaying pre-switch audio at capture speed creates a backlog that can never catch up.
             boolean forced;synchronized(policy){forced=policy.forced(now);}
             LiveTranslation rtc=connection;
-            if(mediaMode&&joined&&rtc!=null&&!forced){rtc.send(samples,count);if(rms*32768>58)lastSentMediaSignal=now;}
+            if(joined&&rtc!=null){boolean live=mediaMode&&requestedMedia&&!forced;rtc.send(live?samples:silence,count);if(live&&rms*32768>58)lastSentMediaSignal=now;}
             if(db>-60){if(ListeningState.replacing)ListeningState.mutedSignalFrames++;else ListeningState.audibleSignalFrames++;}
         }}catch(Exception e){if(capturing)main.post(()->finish("Capture stopped: "+e.getMessage()));}
     }
@@ -91,7 +92,7 @@ public final class ListeningService extends Service {
         AudioRecord source=microphone;micCapturing=true;
         micThread=new Thread(()->{short[] samples=new short[320],silence=new short[320];try{while(micCapturing&&generation==attempt){int count=source.read(samples,0,samples.length,AudioRecord.READ_BLOCKING);if(!micCapturing||generation!=attempt)break;if(count<0)throw new IllegalStateException("Microphone read failed");if(count==0)continue;
             boolean allowMicrophone;synchronized(policy){allowMicrophone=policy.microphoneAllowed(SystemClock.elapsedRealtime());}
-            LiveTranslation rtc=connection;if(rtc!=null)rtc.send(BubbleState.inputAllowed&&allowMicrophone?samples:silence,count);
+            LiveTranslation rtc=connection;if(rtc!=null)rtc.sendMicrophone(BubbleState.inputAllowed&&allowMicrophone&&!mediaMode&&!requestedMedia&&unlocked()?samples:silence,count);
         }}catch(Exception e){if(micCapturing&&generation==attempt)main.post(()->{if(generation==attempt)finish("Microphone stopped. Enable Any Voice again.");});}},"BubbleMicrophone");micThread.start();
     }
     private void stopMicrophone(){
@@ -99,25 +100,32 @@ public final class ListeningService extends Service {
     }
     private void openConnection(boolean media){
         if(!capturing||connection!=null||LiveTranslation.isStopping())return;
-        mediaMode=media;modeSince=SystemClock.elapsedRealtime();long generation=++attempt;joined=false;hadAnswer=false;
+        mediaMode=media;requestedMedia=media;modeSince=SystemClock.elapsedRealtime();long generation=++attempt;joined=false;hadAnswer=false;
         if(media){setReplacement(true);ListeningState.sourceText="";ListeningState.translatedText="";}
         BubbleState.active=!media;BubbleState.inputAllowed=false;BubbleState.phase="connecting";
         ListeningState.message=media?"Connecting media translation":"Connecting Bubble";BubbleState.message=ListeningState.message;
         try{
             connection=new LiveTranslation(this,new LiveTranslation.Listener(){
-                public void ready(){main.post(()->{if(generation!=attempt||!capturing)return;joined=true;if(!media)try{startMicrophone(generation);}catch(Exception e){finish("Could not start microphone: "+e.getMessage());}});}
+                public void ready(){main.post(()->{if(generation!=attempt||!capturing)return;joined=true;});}
                 public void routing(boolean translated){
-                    if(!media)return;
+                    if(!mediaMode)return;
                     java.util.concurrent.FutureTask<Void> task=new java.util.concurrent.FutureTask<>(()->{if(generation==attempt&&capturing)setReplacement(translated);return null;});
                     main.post(task);try{task.get(2,java.util.concurrent.TimeUnit.SECONDS);}catch(Exception e){task.cancel(false);throw new IllegalStateException("Could not route media volume",e);}
                 }
                 public void failed(String message){main.post(()->{if(generation==attempt&&capturing)finish(message);});}
-                public void status(JSONObject data){if(media||generation!=attempt||!capturing)return;
+                public void status(JSONObject data){if(generation!=attempt||!capturing)return;
+                    boolean actualMedia="media".equals(data.optString("input_mode","media"));
+                    main.post(()->{if(generation!=attempt||!capturing)return;
+                        if(actualMedia!=mediaMode){mediaMode=actualMedia;modeSince=SystemClock.elapsedRealtime();if(actualMedia){stopMicrophone();setReplacement(true);}else if(unlocked())try{startMicrophone(generation);}catch(Exception e){finish("Microphone could not start");}}
+                        else if(!actualMedia&&unlocked()&&!micCapturing)try{startMicrophone(generation);}catch(Exception e){finish("Microphone could not start");}
+                    });
+                    BubbleState.active=!actualMedia;
+                    if(!actualMedia)BubbleState.translationPending=false;
                     BubbleState.phase=data.optString("bubble_state");BubbleState.message=data.optString("message");BubbleState.reply=data.optString("translated_text");BubbleState.heard=data.optString("source_text");BubbleState.inputAllowed=data.optBoolean("input_allowed");BubbleState.waitingForReply=data.optBoolean("waiting_for_user");BubbleState.screenBusy=data.optBoolean("screen_research");
-                    ListeningState.message=BubbleState.message;
+                    if(!actualMedia)ListeningState.message=BubbleState.message;
                     if("speaking".equals(BubbleState.phase))hadAnswer=true;
                 }
-            },!media);connection.start();
+            },!media,true);connection.start();
         }catch(Exception e){finish("Could not connect: "+e.getMessage());}
     }
     private void closeConnection(){
@@ -128,20 +136,20 @@ public final class ListeningService extends Service {
     private void askBubble(){
         if(!capturing)return;
         long now=SystemClock.elapsedRealtime();boolean asking;synchronized(policy){asking=!policy.forced(now);if(asking)policy.ask(now);else policy.automatic();}
-        if(asking&&mediaMode){closeConnection();volume.mute();}
+        BubbleState.translationPending=asking&&mediaMode;
+        if(asking&&mediaMode)volume.mute();
     }
     private void setReplacement(boolean enabled){if(enabled)volume.mute();else volume.restore();ListeningState.replacing=enabled;}
     private final Runnable tick=new Runnable(){public void run(){
         if(!capturing)return;
-        long now=SystemClock.elapsedRealtime();boolean wanted,forced;synchronized(policy){policy.holdConversation(BubbleState.waitingForReply||!mediaMode&&("thinking".equals(BubbleState.phase)||"speaking".equals(BubbleState.phase)));wanted=policy.wantsMedia(now);forced=policy.forced(now);}
+        long now=SystemClock.elapsedRealtime();boolean wanted,forced;synchronized(policy){policy.holdConversation(BubbleState.translationPending||BubbleState.waitingForReply||!mediaMode&&("thinking".equals(BubbleState.phase)||"speaking".equals(BubbleState.phase)));wanted=policy.wantsMedia(now);forced=policy.forced(now);}
         ListeningState.manualConversation=forced;
         boolean locked=!unlocked();
-        if(locked&&!mediaMode&&connection!=null)closeConnection();
+        if(locked&&micCapturing)stopMicrophone();
         if(!locked||wanted){
-            if(connection!=null&&wanted!=mediaMode){
-                boolean responding=!mediaMode&&("thinking".equals(BubbleState.phase)||"speaking".equals(BubbleState.phase));
-                boolean drained=connection.outputIdle()&&(!mediaMode||now-lastSentMediaSignal>6500);
-                if(!responding&&drained&&now-modeSince>1500)closeConnection();
+            if(connection!=null&&joined&&wanted!=requestedMedia){
+                requestedMedia=wanted;connection.input(wanted);
+                if(!wanted){BubbleState.inputAllowed=false;ListeningState.message="Finishing translated audio before Bubble";}
             }
             if(connection==null&&!LiveTranslation.isStopping()&&now-enabledAt>900)openConnection(wanted);
         }

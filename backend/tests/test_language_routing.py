@@ -3,6 +3,7 @@ import json
 import logging
 import struct
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 from anyvoice.session import Pipeline, Session
 from anyvoice.parallel_voice import ParallelVoice
@@ -20,23 +21,27 @@ class LanguageRoutingTests(unittest.IsolatedAsyncioTestCase):
         p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":lang,
             "sentenceId":identity,"offset":offset,"isFinal":final,"text":text}}).encode())
 
+    def confirm(self,p,lang,identity,offset):
+        with patch('anyvoice.session.time.monotonic',return_value=1000):self.source(p,lang,identity,offset)
+        with patch('anyvoice.session.time.monotonic',return_value=1001):self.source(p,lang,identity+1,offset+1)
+
     async def test_telugu_original_and_return_to_translation_without_stale_sentences(self):
         p,s=self.pipeline()
         self.assertEqual(s.route_mode,"detecting")
         self.source(p,"te-IN",1,100)
         p.receive_caption(json.dumps(caption(identity=1)).encode())
         self.assertEqual(s.route_mode,"original");self.assertTrue(p.phrases.empty())
-        self.source(p,"en-IN",2,200)
+        self.confirm(p,"en-IN",2,200)
         p.receive_caption(json.dumps(caption(identity=2)).encode())
         phrase=p.phrases.get_nowait()
         self.assertEqual(s.route_mode,"translated");self.assertEqual(phrase[2],2)
-        self.source(p,"te-IN",3,300)
-        self.assertFalse(p.current_epoch(phrase[2]))
+        self.confirm(p,"te-IN",4,300)
+        self.assertTrue(p.current_epoch(phrase[2])) # Accepted speech can finish after a confirmed route change.
         self.source(p,"en-IN",2,200) # late old source must not switch back
         p.receive_caption(json.dumps(caption(identity=2,text="additional old translation")).encode())
         self.assertEqual(s.route_mode,"original");self.assertTrue(p.phrases.empty())
-        self.source(p,"hi-IN",4,400)
-        p.receive_caption(json.dumps(caption(identity=4)).encode())
+        self.confirm(p,"hi-IN",6,400)
+        p.receive_caption(json.dumps(caption(identity=6)).encode())
         self.assertEqual(s.detected_language,"hi-IN");self.assertEqual(p.phrases.get_nowait()[2],4)
 
     async def test_translation_before_source_is_held_and_telugu_is_suppressed(self):
@@ -48,8 +53,21 @@ class LanguageRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.source(p,"en-IN",1,100)
         self.assertFalse(p.phrases.empty());p.phrases.get_nowait()
         p.receive_caption(json.dumps(caption(identity=2)).encode())
-        self.source(p,"te-IN",2,200)
+        self.confirm(p,"te-IN",2,200)
         self.assertTrue(p.phrases.empty());self.assertEqual(s.route_mode,"original")
+
+    async def test_non_target_language_flapping_keeps_accepted_generation_and_epoch(self):
+        p,s=self.pipeline();self.source(p,'hi-IN',1,100)
+        epoch=s.route_epoch
+        for index,language in enumerate(('ta-IN','en-IN','ta-IN','hi-IN'),2):
+            self.source(p,language,index,index*100)
+            p.receive_caption(json.dumps(caption(identity=index)).encode())
+        self.assertEqual(s.route_epoch,epoch)
+        self.assertEqual(p.phrases.qsize(),4)
+        self.assertTrue(all(p.phrases.get_nowait()[2]==epoch for _ in range(4)))
+        # One target-language misclassification cannot switch playback or invalidate generation.
+        self.source(p,'te-IN',20,2000)
+        self.assertEqual(s.route_mode,'translated');self.assertTrue(p.current_epoch(epoch))
 
     async def test_epoch_wire_header_keeps_transport_sequence_across_language_switch(self):
         queue=AudioQueue();self.addCleanup(queue.close)

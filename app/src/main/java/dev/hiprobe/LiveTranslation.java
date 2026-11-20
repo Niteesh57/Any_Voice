@@ -19,13 +19,18 @@ final class LiveTranslation {
     interface Listener { void ready(); void routing(boolean translated); void failed(String message); default void status(JSONObject data) {} }
     private final Context context;
     private final boolean bubble;
+    private final boolean unified;
     private final BackendClient backend;
     private final OutputVolume voiceVolume;
     private final Listener listener;
     private final ScheduledExecutorService network = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean closed = new AtomicBoolean();
-    private final ArrayBlockingQueue<byte[]> upload = new ArrayBlockingQueue<>(100);
-    private volatile RtcEngine engine;
+    private static final class InputFrame {final byte[] bytes;final int track;InputFrame(byte[] bytes,int track){this.bytes=bytes;this.track=track;}}
+    private final ArrayBlockingQueue<InputFrame> upload = new ArrayBlockingQueue<>(200);
+    private volatile RtcEngineEx engine;
+    private volatile boolean mediaJoined,micJoined;
+    private final ConcurrentHashMap<Integer,Integer> chunkEnds=new ConcurrentHashMap<>();
+    private RtcConnection micConnection;
     private volatile boolean joined;
     private volatile String sessionId;
     private volatile boolean outputEnabled = true;
@@ -39,9 +44,11 @@ final class LiveTranslation {
     private volatile int downloadedSequence;
     private volatile long lastPacketAt;
     boolean outputIdle(){return downloadedSequence<=playedSequence&&prepared.isEmpty()&&SystemClock.elapsedRealtime()-lastPacketAt>2000;}
+    String diagnosticSession(){return sessionId;}
     private volatile String terminalMessage;
     private volatile int terminalSequence;
     private int customTrack = -1;
+    private int micTrack = -1;
     private int workerUid;
     private AudioTrack output;
     private Thread playback, publishing, downloading;
@@ -57,13 +64,16 @@ final class LiveTranslation {
 
     LiveTranslation(Context context, Listener listener) { this(context,listener,false); }
     LiveTranslation(Context context, Listener listener, boolean bubble) {
-        this.context=context.getApplicationContext();this.listener=listener;this.bubble=bubble;
+        this(context,listener,bubble,false);
+    }
+    LiveTranslation(Context context,Listener listener,boolean bubble,boolean unified){
+        this.context=context.getApplicationContext();this.listener=listener;this.bubble=bubble;this.unified=unified;
         backend=new BackendClient(context);voiceVolume=new OutputVolume(context);
     }
     void start() {
         network.execute(() -> {
             try {
-                JSONObject data = bubble ? backend.startBubble() : backend.start();
+                JSONObject data = unified?backend.startUnified(!bubble):bubble ? backend.startBubble() : backend.start();
                 sessionId = data.getString("id");
                 if (!"queued-pcm".equals(data.optString("playback_mode")))
                     throw new IllegalStateException("Backend needs the queued-audio update");
@@ -85,8 +95,7 @@ final class LiveTranslation {
         config.mEventHandler = new IRtcEngineEventHandler() {
             @Override public void onJoinChannelSuccess(String channel, int uid, int elapsed) {
                 if (closed.get()) return;
-                joined = true;
-                listener.ready();
+                mediaJoined=true;readyIfJoined();
             }
             @Override public void onUserJoined(int uid, int elapsed) {
                 RtcEngine rtc = engine;
@@ -98,7 +107,7 @@ final class LiveTranslation {
             }
             @Override public void onTokenPrivilegeWillExpire(String token) { fail("Session is expiring. Stop and start a new session."); }
         };
-        engine = RtcEngine.create(config);
+        engine = (RtcEngineEx)RtcEngine.create(config);
         require(engine.enableAudio(), "enable audio");
         require(engine.enableLocalAudio(false), "disable microphone capture");
         // RTC uploads captured playback only. Translated speech is played by our own ordered AudioTrack.
@@ -106,6 +115,7 @@ final class LiveTranslation {
         trackConfig.enableLocalPlayback = false;
         customTrack = engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE, trackConfig);
         if (customTrack < 0) throw new IllegalStateException("Could not create source audio track");
+        if(unified){micTrack=engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE,trackConfig);if(micTrack<0)throw new IllegalStateException("Could not create question audio track");}
         int minimum = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minimum <= 0) throw new IllegalStateException("Audio output format unavailable");
         output = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
@@ -127,21 +137,33 @@ final class LiveTranslation {
         options.publishCustomAudioTrackId = customTrack;
         options.autoSubscribeAudio = false; options.autoSubscribeVideo = false;
         require(engine.joinChannel(data.getString("token"), data.getString("channel"), data.getInt("uid"), options), "join channel");
+        if(unified){
+            micConnection=new RtcConnection(data.getString("channel"),data.getInt("microphone_uid"));
+            ChannelMediaOptions micOptions=new ChannelMediaOptions();micOptions.channelProfile=Constants.CHANNEL_PROFILE_LIVE_BROADCASTING;micOptions.clientRoleType=Constants.CLIENT_ROLE_BROADCASTER;
+            micOptions.publishMicrophoneTrack=false;micOptions.publishCameraTrack=false;micOptions.publishCustomAudioTrack=true;micOptions.publishCustomAudioTrackId=micTrack;
+            micOptions.autoSubscribeAudio=false;micOptions.autoSubscribeVideo=false;
+            require(engine.joinChannelEx(data.getString("microphone_token"),micConnection,micOptions,new IRtcEngineEventHandler(){
+                @Override public void onJoinChannelSuccess(String channel,int uid,int elapsed){if(!closed.get()){micJoined=true;readyIfJoined();}}
+                @Override public void onError(int code){if(!closed.get())fail("Question audio connection error ("+code+")");}
+            }),"join question input");
+        }
     }
+    private synchronized void readyIfJoined(){if(!closed.get()&&!joined&&mediaJoined&&(!unified||micJoined)){joined=true;listener.ready();}}
     private void poll() {
         if (closed.get() || sessionId == null) return;
         try {
             JSONObject status = backend.status(sessionId);
             if(closed.get())return;
             String state = status.getString("state");
+            JSONObject boundaries=status.optJSONObject("chunk_ends");if(boundaries!=null){java.util.Iterator<String> keys=boundaries.keys();while(keys.hasNext()){String key=keys.next();chunkEnds.put(Integer.parseInt(key),boundaries.getInt(key));}}
             int epoch = status.getInt("route_epoch");
-            boolean translated = "translated".equals(status.getString("route_mode"));
+            boolean translated = unified ? !"original".equals(status.getString("route_mode")) : "translated".equals(status.getString("route_mode"));
             if (epoch != policy.epoch || translated != policy.translated) policy = new Policy(epoch,translated);
             if (state.equals("error") || state.equals("stopped")) {
                 terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
                 terminalMessage = status.optString("message", "Session ended");
             }
-            if(bubble){
+            if(bubble||unified){
                 JSONArray actions=status.optJSONArray("device_actions");
                 if(actions!=null)for(int i=0;i<actions.length();i++){
                     if(closed.get())return;
@@ -152,7 +174,7 @@ final class LiveTranslation {
                 if(!status.optBoolean("screen_research"))ScreenTools.clearResults();
                 listener.status(status);
             }
-            else {
+            if(!bubble||unified) {
                 ListeningState.sourceText=status.optString("source_text");
                 ListeningState.translatedText=status.optString("translated_text");
                 ListeningState.phrases=status.optInt("phrases");
@@ -167,20 +189,24 @@ final class LiveTranslation {
         } catch (Exception e) { fail("Connection to backend lost. Original audio will be restored."); }
     }
     void send(short[] samples, int count) {
+        sendTrack(samples,count,customTrack);
+    }
+    void sendMicrophone(short[] samples,int count){sendTrack(samples,count,unified?micTrack:customTrack);}
+    private void sendTrack(short[] samples,int count,int track){
         if (!joined || closed.get() || terminalMessage != null) return;
         // AudioRecord reads 20 ms at a time; preserve little-endian PCM16.
         byte[] bytes = new byte[count * 2];
         for (int i = 0; i < count; i++) { bytes[2*i] = (byte)samples[i]; bytes[2*i+1] = (byte)(samples[i] >> 8); }
-        if (!upload.offer(bytes)) fail("Audio upload connection is congested.");
+        if (!upload.offer(new InputFrame(bytes,track))) fail("Audio upload connection is congested.");
     }
     private void publish() {
         try {
             while (!closed.get()) {
-                byte[] bytes = upload.poll(200, TimeUnit.MILLISECONDS);
-                if (bytes == null) continue;
+                InputFrame frame = upload.poll(200, TimeUnit.MILLISECONDS);
+                if (frame == null) continue;
                 RtcEngine rtc = engine;
-                if (rtc != null && joined) require(rtc.pushExternalAudioFrame(bytes, SystemClock.elapsedRealtime(), 16000, 1,
-                    Constants.BytesPerSample.TWO_BYTES_PER_SAMPLE, customTrack), "send source audio");
+                if (rtc != null && joined) require(rtc.pushExternalAudioFrame(frame.bytes, SystemClock.elapsedRealtime(), 16000, 1,
+                    Constants.BytesPerSample.TWO_BYTES_PER_SAMPLE, frame.track), "send source audio");
             }
         } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         catch (RuntimeException e) { if (!closed.get()) fail(e.getMessage()); }
@@ -228,31 +254,36 @@ final class LiveTranslation {
         java.util.ArrayDeque<long[]> ends = new java.util.ArrayDeque<>();
         Policy applied = policy;
         PreparedAudio clip = null;
+        int activeChunk=0;
         boolean first = true;
         try {
             while (!closed.get()) {
                 float gain = voiceVolume.gain();
                 if (gain != appliedGain) { output.setVolume(gain); appliedGain = gain; }
+                long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
+                while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
+                    long[] done = ends.removeFirst();
+                    playedSequence = (int)done[0]; if(!bubble||unified)ListeningState.playingChunk = (int)done[2];
+                }
                 Policy wanted = policy;
-                if (wanted != applied) {
-                    // Only a confirmed language change cancels obsolete translated audio.
+                int endSequence=activeChunk==0?0:chunkEnds.getOrDefault(activeChunk,-1);
+                boolean atBoundary=activeChunk==0||endSequence>=0&&playedSequence>=endSequence;
+                if (wanted != applied && atBoundary) {
+                    android.util.Log.i("AnyVoicePlayback","handoff old_epoch="+applied.epoch+" new_epoch="+wanted.epoch+" completed_chunk="+activeChunk+" played="+playedSequence+" boundary="+endSequence);
+                    // Playback ACK, not generation completion, defines the safe sentence handoff.
                     output.pause(); output.flush();
                     if (!ends.isEmpty()) playedSequence = (int)ends.peekLast()[0];
                     ends.clear(); framesWritten = 0; first = true; if(!bubble)ListeningState.playingChunk = 0;
                     listener.routing(wanted.translated); // Applies media volume on the service thread before playback.
                     if (closed.get()) return;
-                    output.play(); applied = wanted;
-                }
-                long consumed = Integer.toUnsignedLong(output.getPlaybackHeadPosition());
-                while (!ends.isEmpty() && ends.peekFirst()[1] <= consumed) {
-                    long[] done = ends.removeFirst();
-                    playedSequence = (int)done[0]; if(!bubble)ListeningState.playingChunk = (int)done[2];
+                    output.play(); applied = wanted;activeChunk=0;
                 }
                 if (clip == null) clip = prepared.poll(50, TimeUnit.MILLISECONDS);
                 if (clip == null) {
                     if (terminalMessage != null && downloadedSequence >= terminalSequence && ends.isEmpty()) { fail(terminalMessage); return; }
                     continue;
                 }
+                if(policy!=applied&&activeChunk!=0&&clip.chunk!=activeChunk){Thread.sleep(10);continue;}
                 if (clip.epoch < applied.epoch || (clip.epoch == applied.epoch && !applied.translated)) {
                     playedSequence = clip.sequence; clip = null; continue;
                 }
@@ -262,9 +293,9 @@ final class LiveTranslation {
                     while (prepared.isEmpty() && SystemClock.elapsedRealtime() < deadline && !closed.get()) Thread.sleep(5);
                     first = false;
                 }
-                if (policy != applied) continue;
+                activeChunk=clip.chunk;
                 int offset = 0;
-                while (offset < clip.pcm.length && !closed.get() && policy == applied) {
+                while (offset < clip.pcm.length && !closed.get()) {
                     int written = output.write(clip.pcm, offset, Math.min(3200, clip.pcm.length-offset), AudioTrack.WRITE_BLOCKING);
                     if (written <= 0) throw new IllegalStateException("Translated audio playback stopped");
                     offset += written; framesWritten += written / 2;
@@ -283,6 +314,7 @@ final class LiveTranslation {
         if (id != null) { try { backend.stop(id); } catch (Exception ignored) { /* Backend lease expires if unreachable. */ } }
     }
     void cancelResearch(){String id=sessionId;if(id!=null)new Thread(()->{try{backend.cancelResearch(id);}catch(Exception ignored){}},"CancelResearch").start();}
+    void input(boolean media){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.input(sessionId,media);}catch(Exception e){if(!closed.get())fail("Could not switch audio input");}});}
     void close() {
         if (!closed.compareAndSet(false, true)) return;
         stopping = true;
@@ -297,8 +329,10 @@ final class LiveTranslation {
                 if (output != null) { try { output.pause(); output.flush(); } catch (RuntimeException ignored) { } }
                 join(publishing); join(playback); join(downloading);
                 if (engine != null) {
+                    if(micConnection!=null)engine.leaveChannelEx(micConnection);
                     engine.leaveChannel();
                     if (customTrack >= 0) engine.destroyCustomAudioTrack(customTrack);
+                    if(micTrack>=0)engine.destroyCustomAudioTrack(micTrack);
                     RtcEngine.destroy(); engine = null;
                 }
                 if (output != null) { output.release(); output = null; }

@@ -135,6 +135,7 @@ class ParallelVoice:
                 self.on_error(chunk.error)
                 return
             self.log.info('chunk_released chunk=%03d packets=%d',chunk.number,chunk.part)
+            self.audio.complete_chunk(chunk.number)
             del self.chunks[chunk.number]
             chunk.path.unlink(missing_ok=True)
             self.next_release += 1

@@ -4,6 +4,8 @@ Hear app audio in the language you choose. A native Android hackathon app built 
 
 Version 0.17 adds [on-demand screen reading, bounded scrolling, visual comparison and clarification](docs/screen-assist.md).
 
+Version 0.19 adds [confirmed background detection, uninterrupted chunk handoffs and retained media/Bubble connections](docs/noninterruptible-routing.md). Version 0.18 added [persistent media-caption recall](docs/media-memory.md).
+
 Version 0.16 adds [persistent Bubble memory, task tools and native app/YouTube actions](docs/memory-tools.md).
 
 ## App experience
@@ -12,7 +14,7 @@ Version 0.16 adds [persistent Bubble memory, task tools and native app/YouTube a
 - Live Falcon voice library: languages and characters come from Murf, with male/female filters and real voice previews. No character is preselected.
 - Both the preview and session-start APIs refresh the provider catalog and validate the exact voice ID against its declared native `locale` and `supportedLocales`. Unsupported pairs are rejected; there is no automatic substitute voice.
 - Output options cover the intersection of Falcon locales and Agora transcription/translation support, including documented locale-code mappings. The current catalog yielded 138 compatible voices and 43 locale options; these counts are dynamic. Hinglish is excluded because Agora has no corresponding translation target.
-- Original audio stays audible during initial detection. Speech in the selected language keeps its original voice; other detected languages are translated and spoken by the selected Falcon voice.
+- Original audio is muted during connection/detection. Confirmed speech in the selected language restores its original voice; other detected languages are translated and spoken by the selected Falcon voice. Detection runs independently of playback, with handoffs at completed voice chunks.
 - One Enable/Disable control starts automatic media translation and Bubble conversation. Media takes priority; after sustained quiet, the microphone can take questions while unlocked. Ask Bubble temporarily overrides media.
 - A translucent 52 dp floating bubble can be dragged, snaps to a screen edge, and expands on tap to show status and controls.
 - Animated waveform, screen entrances, voice sheet and button feedback. System motion settings are respected.

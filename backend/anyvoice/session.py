@@ -18,6 +18,7 @@ class Session:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     channel: str = field(default_factory=lambda: "av_" + uuid.uuid4().hex)
     source_uid: int = 1001
+    microphone_uid: int = 1002
     worker_uid: int = 2001  # Conversational AI voice agent; Android subscribes to this UID.
     control_uid: int = 3001
     stt_uid: int = 4001
@@ -56,17 +57,21 @@ class Session:
     input_frames: int = 0
     input_rms: int = 0
     max_input_rms: int = 0
+    input_mode: str = "media"
+    desired_input: str = "media"
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
                 "screen_research": self.screen_research,
                 "waiting_for_user": bool(self.owner and self.memory_store and (self.memory_store.question(self.owner) or {}).get("state")=="pending"),
                 "mode": self.mode, "bubble_state": self.bubble_state, "wake_sequence": self.wake_sequence,
-                "input_allowed": self.mode == "bubble" and self.bubble_state in ("standby", "listening"),
+                "input_mode": self.input_mode, "desired_input": self.desired_input,
+                "input_allowed": (self.mode == "bubble" or self.mode == "unified" and self.input_mode == "bubble") and self.bubble_state in ("standby", "listening"),
                 "source_text": self.source, "translated_text": self.translated,
                 "phrases": self.phrases, "audio_frames": self.audio_frames,
                 "playback_mode": "queued-pcm", "queued_audio_ms": sum(c['duration_ms'] for c in self.audio.clips.values()) if self.audio else 0,
                 "last_audio_sequence": self.audio.next_sequence - 1 if self.audio else 0,
+                "chunk_ends": self.audio.chunk_ends if self.audio else {},
                 "voice_provider": self.voice_provider,
                 "audio_protocol": 3,
                 "route_mode": self.route_mode, "route_epoch": self.route_epoch,
@@ -123,6 +128,7 @@ class Pipeline:
         self.pending_translations = {}
         self.latest_source_offset = -1
         self.candidate = None
+        self.route_votes = None
         if session.source_language != "auto":
             session.route_mode = "translated"
             session.detected_language = session.source_language
@@ -144,7 +150,8 @@ class Pipeline:
         return language.split("-")[0] == self.session.target_language.split("-")[0]
 
     def current_epoch(self, epoch):
-        return self.session.route_mode == "translated" and epoch == self.session.route_epoch
+        # Accepted speech is immutable: a later detector result cannot cancel its generation.
+        return 0 <= epoch <= self.session.route_epoch
 
     def route_source(self, item):
         language, identity = item.get("language"), item.get("id")
@@ -163,16 +170,29 @@ class Pipeline:
             return
         if isinstance(offset, (int,float)): self.latest_source_offset = offset
         session = self.session
-        if session.detected_language != language:
+        wanted = "original" if self.is_target_language(language) else "translated"
+        confirmed = session.route_mode == "detecting" or wanted == session.route_mode
+        if not confirmed:
+            votes=self.route_votes
+            if votes is None or votes[0]!=wanted:self.route_votes=(wanted,{identity},now)
+            else:
+                votes[1].add(identity)
+                confirmed=len(votes[1])>=2 and now-votes[2]>=.6
+        else:self.route_votes=None
+        if confirmed and session.route_mode != wanted:
             session.route_epoch += 1
-            session.detected_language = language
-            session.route_mode = "original" if self.is_target_language(language) else "translated"
-            session.translated = ""
-            self.packet_buffer.clear()
-            if self.parallel: self.parallel.release_ready()
+            session.route_mode = wanted
             self.log.info("language_route session=%s language=%s mode=%s epoch=%d",
                 session.id[:8],language,session.route_mode,session.route_epoch)
-        session.message = "Your language detected - original audio" if self.is_target_language(language) else "Translating to your language"
+            if wanted == 'translated':
+                for segment_id,(segment_language,_) in list(self.language_segments.items()):
+                    if self.route_votes and segment_id in self.route_votes[1]:
+                        self.language_segments[segment_id]=(segment_language,session.route_epoch)
+                        pending=self.pending_translations.pop(segment_id,None)
+                        if pending:self.accept_translation(pending)
+            self.route_votes=None
+        if confirmed:session.detected_language = language
+        session.message = "Your language detected - original audio" if session.route_mode=='original' else "Translating to your language"
         self.language_segments[identity] = (language,session.route_epoch)
         if len(self.language_segments)>2000: self.language_segments.pop(next(iter(self.language_segments)))
         pending = self.pending_translations.pop(identity,None)
@@ -186,7 +206,11 @@ class Pipeline:
                 if len(self.pending_translations)>128: self.pending_translations.pop(next(iter(self.pending_translations)))
                 return
             language, epoch = segment
-            if self.is_target_language(language) or not self.current_epoch(epoch): return
+            if self.is_target_language(language):return
+            if self.session.route_mode != 'translated' or epoch != self.session.route_epoch:
+                self.pending_translations[item['id']]=item
+                if len(self.pending_translations)>128:self.pending_translations.pop(next(iter(self.pending_translations)))
+                return
         else:
             epoch = self.session.route_epoch
         delta = self.finals.accept(item["id"], item["text"])
@@ -200,7 +224,7 @@ class Pipeline:
             self.phrases.put_nowait((delta,time.monotonic(),epoch))
 
     def remember_media(self,item,kind,language):
-        if self.session.mode == 'translation' and self.session.memory_store and self.session.owner:
+        if self.session.mode in ('translation','unified') and self.session.memory_store and self.session.owner:
             self.session.memory_store.media_segment(self.session.owner,self.session.id,item['id'],kind,language,item['text'])
 
     def receive_caption(self, data):
@@ -263,6 +287,7 @@ class Pipeline:
                     self.session.audio.append(bytes(self.packet_buffer),self.engine_chunk,self.engine_part,self.engine_epoch)
                     self.packet_buffer.clear()
                 self.session.phrases += 1
+                self.session.audio.complete_chunk(self.engine_chunk)
                 self.log.info('speech_streamed session=%s last_packet=%d generation_ms=%.0f',
                     self.session.id[:8], self.session.audio.next_sequence-1,
                     (time.monotonic()-submitted)*1000)

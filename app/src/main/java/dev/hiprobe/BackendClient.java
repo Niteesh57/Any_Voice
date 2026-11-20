@@ -65,6 +65,12 @@ final class BackendClient {
         return request("POST", "/v1/sessions",new JSONObject().put("mode","bubble").put("source_language","auto")
             .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context).put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(this.context).apps()).put("screen_tools",ScreenTools.authorized(this.context)));
     }
+    JSONObject startUnified(boolean media) throws Exception {
+        return request("POST","/v1/sessions",new JSONObject().put("mode","unified").put("input_mode",media?"media":"bubble")
+            .put("source_language","auto").put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","murf-direct")
+            .put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(context).apps()).put("screen_tools",ScreenTools.authorized(context)));
+    }
+    void input(String id,boolean media)throws Exception{request("POST","/v1/sessions/"+id+"/input",new JSONObject().put("mode",media?"media":"bubble"));}
     void cancelResearch(String id) throws Exception{request("POST","/v1/sessions/"+id+"/cancel-research",new JSONObject());}
     JSONObject overview() throws Exception{return request("GET","/v1/me/overview",null);}
     JSONObject tool(String name,JSONObject args) throws Exception{return request("POST","/v1/me/tools",new JSONObject().put("request_id",java.util.UUID.randomUUID().toString()).put("name",name).put("arguments",args));}

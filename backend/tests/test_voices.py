@@ -62,6 +62,8 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
   self.assertEqual(s.route_mode,"original")
   p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":2,"offset":2,"text":"test","isFinal":True}}).encode())
   p.receive_caption(json.dumps({"translation":{"uid":1001,"sentenceId":2,"results":[{"language":"ja-JP","texts":["translated"],"isFinal":True}]}}).encode())
+  p.route_votes=(p.route_votes[0],p.route_votes[1],p.route_votes[2]-1)
+  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":3,"offset":3,"text":"more speech","isFinal":True}}).encode())
   self.assertEqual(p.phrases.get_nowait()[0],"translated")
   calls=[]
   async def respond(request):calls.append(json.loads(request.content));return httpx.Response(200,json={"agent_id":"fixture"})

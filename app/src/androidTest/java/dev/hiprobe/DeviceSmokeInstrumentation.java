@@ -15,6 +15,7 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
         Bundle results=new Bundle();
         try{
             Context real=getTargetContext();
+            if("unified".equals(requestedMode)){checkUnified(real,results);finish(-1,results);return;}
             if("apps".equals(requestedMode)){
                 DeviceTools tools=new DeviceTools(real);JSONObject apps=tools.apps();
                 if(!apps.has("com.google.android.youtube"))throw new AssertionError("YouTube missing from native capabilities");
@@ -76,5 +77,41 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
             results.putString("youtube_search",search.toString());Thread.sleep(3000);
             finish(-1,results);
         }catch(Throwable e){results.putString("failure",e.getClass().getSimpleName()+": "+e.getMessage());finish(0,results);}
+    }
+    private interface Check{boolean ready();}
+    private static void until(Check check,java.util.concurrent.atomic.AtomicReference<String> error,long millis)throws Exception{
+        long end=android.os.SystemClock.elapsedRealtime()+millis;
+        while(!check.ready()&&android.os.SystemClock.elapsedRealtime()<end){if(error.get()!=null)throw new AssertionError(error.get());Thread.sleep(100);}
+        if(!check.ready())throw new AssertionError("Timed out waiting for unified transition");
+    }
+    private static void stream(LiveTranslation live,byte[] pcm,boolean mic)throws Exception{
+        long started=android.os.SystemClock.elapsedRealtime();
+        for(int offset=0;offset<pcm.length+32000;offset+=640){short[] frame=new short[320];for(int n=0;n<320&&offset+n*2+1<pcm.length;n++)frame[n]=(short)((pcm[offset+n*2]&255)|(pcm[offset+n*2+1]<<8));
+            if(mic)live.sendMicrophone(frame,frame.length);else live.send(frame,frame.length);
+            long wait=started+(offset+640)/32-android.os.SystemClock.elapsedRealtime();if(wait>0)Thread.sleep(wait);
+        }
+    }
+    private void checkUnified(Context real,Bundle results)throws Exception{
+        String suffix=java.util.UUID.randomUUID().toString();Context isolated=new ContextWrapper(real){@Override public SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(name.equals("bubble_identity")?"unified_check_"+suffix:name,mode);}};
+        java.util.concurrent.atomic.AtomicReference<String> error=new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<JSONObject> status=new java.util.concurrent.atomic.AtomicReference<>(new JSONObject());
+        java.util.concurrent.atomic.AtomicBoolean ready=new java.util.concurrent.atomic.AtomicBoolean();
+        LiveTranslation live=new LiveTranslation(isolated,new LiveTranslation.Listener(){public void ready(){ready.set(true);}public void routing(boolean translated){}public void failed(String message){error.set(message);}public void status(JSONObject data){status.set(data);}},false,true);
+        try{
+            live.start();until(ready::get,error,85000);String session=live.diagnosticSession();
+            byte[] cooking=java.nio.file.Files.readAllBytes(new java.io.File(real.getFilesDir(),"check-cooking.pcm").toPath());
+            stream(live,cooking,false);live.input(false);
+            until(()->"bubble".equals(status.get().optString("input_mode")),error,90000);
+            if(!session.equals(live.diagnosticSession()))throw new AssertionError("Session reconnected");
+            Thread.sleep(700);
+            byte[] question=java.nio.file.Files.readAllBytes(new java.io.File(real.getFilesDir(),"check-question.pcm").toPath());
+            stream(live,question,true);
+            until(()->status.get().optInt("phrases")>0&&"speaking".equals(status.get().optString("bubble_state")),error,65000);
+            until(()->"listening".equals(status.get().optString("bubble_state"))&&!status.get().optString("translated_text").isEmpty(),error,90000);
+            results.putString("answer",status.get().optString("translated_text"));
+            live.input(true);until(()->"media".equals(status.get().optString("input_mode")),error,10000);
+            if(!session.equals(live.diagnosticSession()))throw new AssertionError("Return to media reconnected");
+            results.putString("unified_round_trip","PASS: same session "+session.substring(0,8)+", actual AudioTrack ACK, media -> Bubble -> media");
+        }finally{live.close();}
     }
 }

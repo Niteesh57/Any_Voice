@@ -37,7 +37,7 @@ class AgoraServices:
     async def open_stt(self):
         s = self.session
         result = await self.request("POST", self.base("stt") + "/join", {
-            "name": "av_stt_" + s.id, "languages": list(s.source_languages), "maxIdleTime": 30,
+            "name": "av_stt_" + s.id, "languages": list(s.source_languages), "maxIdleTime": 900 if s.mode=='unified' else 30,
             "rtcConfig": {
                 "channelName": s.channel, "pubBotUid": str(s.stt_uid),
                 "pubBotToken": self.token(s.stt_uid),
@@ -57,7 +57,7 @@ class AgoraServices:
                 "channel": s.channel, "token": self.token(s.worker_uid),
                 "agent_rtc_uid": str(s.worker_uid),
                 # A silent backend control participant, not the video's audio publisher.
-                "remote_rtc_uids": [str(s.control_uid)], "idle_timeout": 30,
+                "remote_rtc_uids": [str(s.control_uid)], "idle_timeout": 900 if s.mode=='unified' else 30,
                 "advanced_features": {"enable_rtm": True},
                 "asr": {"vendor": "ares", "language": "en-IN"},
                 "llm": {

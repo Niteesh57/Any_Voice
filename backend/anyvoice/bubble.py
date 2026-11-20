@@ -107,6 +107,7 @@ class BubblePipeline(Pipeline):
     self.engine_part+=1;self.session.audio.append(bytes(self.packet_buffer),self.engine_chunk,self.engine_part,self.engine_epoch);self.packet_buffer.clear()
    if self.session.audio.next_sequence==first_sequence:raise ProviderError("Bubble voice returned no audio. Try another supported voice.")
    self.streaming_started=False;self.session.phrases+=1
+   self.session.audio.complete_chunk(self.engine_chunk)
  async def monitor(self):
   while True:
    await asyncio.sleep(.1);now=time.monotonic()

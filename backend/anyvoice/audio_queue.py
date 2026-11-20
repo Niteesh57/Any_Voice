@@ -15,6 +15,12 @@ class AudioQueue:
         self.total_bytes = 0
         self.changed = asyncio.Event()
         self.closed = False
+        self.chunk_ends = {}
+        self.chunk_last = {}
+
+    def complete_chunk(self, chunk):
+        end=self.chunk_last.pop(chunk,None)
+        if end is not None:self.chunk_ends[chunk]=end
 
     def append(self, pcm, chunk_sequence=None, part_sequence=1, epoch=0):
         if not pcm or len(pcm) % 2: raise ValueError('Incomplete PCM audio')
@@ -26,6 +32,7 @@ class AudioQueue:
         temporary.write_bytes(pcm); temporary.replace(path)
         self.clips[seq] = {'sequence': seq, 'chunk_sequence': chunk_sequence if chunk_sequence is not None else seq,
             'part_sequence': part_sequence, 'epoch': epoch, 'bytes': len(pcm), 'duration_ms': len(pcm) * 1000 // 32000, 'path': path}
+        self.chunk_last[self.clips[seq]['chunk_sequence']]=seq
         self.next_sequence += 1; self.total_bytes += len(pcm)
         self.changed.set()
         return seq
@@ -61,6 +68,8 @@ class AudioQueue:
             row = self.clips.pop(earlier); row['path'].unlink(missing_ok=True)
             self.total_bytes -= row['bytes']
         self.acknowledged = seq
+        recent=max(self.chunk_ends,default=0)-64
+        self.chunk_ends={c:end for c,end in self.chunk_ends.items() if end>seq or c>=recent}
 
     def close(self):
         self.closed = True; self.changed.set()

@@ -57,7 +57,10 @@ class ParallelVoiceTests(unittest.IsolatedAsyncioTestCase):
   task=asyncio.create_task(parallel.run(phrases))
   try:
    await asyncio.sleep(.03);self.assertEqual(started,[1,2]);self.assertEqual(parallel.next_number,3)
-   gates[0].set();await asyncio.sleep(.03);self.assertEqual(started,[1,2,3])
+   gates[0].set()
+   async def third_started():
+    while len(started)<3:await asyncio.sleep(.01)
+   await asyncio.wait_for(third_started(),1);self.assertEqual(started,[1,2,3])
   finally:task.cancel();await asyncio.gather(task,return_exceptions=True);audio.close()
  async def test_numbered_wire_protocol_preserves_chunk_and_part(self):
   audio=AudioQueue()
