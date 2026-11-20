@@ -39,7 +39,7 @@ class AgoraServices:
 
     async def open_stt(self):
         s = self.session
-        result = await self.request("POST", self.base("stt") + "/join", {
+        body = {
             "name": "av_stt_" + s.id, "languages": list(s.source_languages), "maxIdleTime": 900 if s.mode=='unified' else 30,
             "rtcConfig": {
                 "channelName": s.channel, "pubBotUid": str(s.stt_uid),
@@ -47,7 +47,9 @@ class AgoraServices:
                 "subscribeAudioUids": [str(s.source_uid)], "enableJsonProtocol": True,
             },
             "translateConfig": {"languages": [{"source": language, "target": [s.target_language]} for language in s.source_languages if language != s.target_language]},
-        })
+        }
+        if not body['translateConfig']['languages']:body.pop('translateConfig')
+        result = await self.request("POST", self.base("stt") + "/join", body)
         self.stt_id = result.get("agent_id")
         if not self.stt_id:
             raise ProviderError("Agora did not return the translation agent ID")

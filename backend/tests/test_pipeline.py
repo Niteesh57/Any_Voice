@@ -75,6 +75,19 @@ class CaptionTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fixed_hindi_uses_single_recognizer_and_same_language_has_no_translation(self):
+        calls=[]
+        async def handle(request):
+            calls.append(json.loads(request.content));return httpx.Response(200,json={'agent_id':'fixture'})
+        for language in ('hi-IN','te-IN'):
+            session=Session(source_language=language,source_languages=(language,))
+            client=httpx.AsyncClient(transport=httpx.MockTransport(handle))
+            service=AgoraServices(configured(),session,lambda uid:'token',client)
+            await service.open_stt();await client.aclose()
+        self.assertEqual(calls[0]['languages'],['hi-IN'])
+        self.assertEqual(calls[0]['translateConfig']['languages'],[{'source':'hi-IN','target':['te-IN']}])
+        self.assertEqual(calls[1]['languages'],['te-IN']);self.assertNotIn('translateConfig',calls[1])
+
     async def test_services_use_only_agora_with_murf_and_te_target(self):
         calls = []
         async def handle(request):
@@ -153,6 +166,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await client.post("/v1/sessions", json={"voice_id":"fixture-voice"}, headers=headers)).status_code, 409)
             stopped = await client.post("/v1/sessions/" + session["id"] + "/stop", headers=headers)
             self.assertEqual(stopped.json()["state"], "stopped")
+            result = await client.post("/v1/sessions",json={"voice_id":"fixture-voice","source_language":"hi-IN"},headers=headers)
+            self.assertEqual(result.status_code,200)
+            self.assertEqual(result.json()['source_languages'],['hi-IN'])
+            self.assertEqual(result.json()['target_language'],'te-IN')
+            await client.post('/v1/sessions/'+result.json()['id']+'/stop',headers=headers)
+            self.assertEqual((await client.post('/v1/sessions',json={'voice_id':'fixture-voice','source_language':'unknown'},headers=headers)).status_code,422)
 
 
 class FakeCompletion:

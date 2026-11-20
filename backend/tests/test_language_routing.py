@@ -24,11 +24,12 @@ class LanguageRoutingTests(unittest.IsolatedAsyncioTestCase):
     def confirm(self,p,lang,identity,offset):
         with patch('anyvoice.session.time.monotonic',return_value=1000):self.source(p,lang,identity,offset)
         with patch('anyvoice.session.time.monotonic',return_value=1001):self.source(p,lang,identity+1,offset+1)
+        with patch('anyvoice.session.time.monotonic',return_value=1002):self.source(p,lang,identity+2,offset+2)
 
     async def test_telugu_original_and_return_to_translation_without_stale_sentences(self):
         p,s=self.pipeline()
         self.assertEqual(s.route_mode,"detecting")
-        self.source(p,"te-IN",1,100)
+        self.confirm(p,"te-IN",1,100)
         p.receive_caption(json.dumps(caption(identity=1)).encode())
         self.assertEqual(s.route_mode,"original");self.assertTrue(p.phrases.empty())
         self.confirm(p,"en-IN",2,200)
@@ -76,6 +77,45 @@ class LanguageRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(struct.unpack("!IIIII",(await anext(stream))[:20]),(1,1,1,1,2))
         self.assertEqual(struct.unpack("!IIIII",(await anext(stream))[:20]),(2,5,1,3,2))
         await stream.aclose()
+
+    async def test_initial_target_misclassification_cannot_unmute_source(self):
+        p,s=self.pipeline()
+        self.source(p,'te-IN',1,100)
+        self.assertEqual(s.route_mode,'detecting')
+        self.source(p,'hi-IN',2,200)
+        self.assertEqual(s.route_mode,'translated')
+        p.receive_caption(json.dumps(caption(identity=2)).encode())
+        self.assertEqual(p.phrases.qsize(),1)
+
+    async def test_intervening_hindi_resets_target_confirmation(self):
+        p,s=self.pipeline();self.source(p,'hi-IN',1,100)
+        with patch('anyvoice.session.time.monotonic',return_value=1000):self.source(p,'te-IN',2,200)
+        with patch('anyvoice.session.time.monotonic',return_value=1001):self.source(p,'hi-IN',3,300)
+        with patch('anyvoice.session.time.monotonic',return_value=1002):self.source(p,'te-IN',4,400)
+        with patch('anyvoice.session.time.monotonic',return_value=1003):self.source(p,'te-IN',5,500)
+        self.assertEqual(s.route_mode,'translated')
+        with patch('anyvoice.session.time.monotonic',return_value=1004):self.source(p,'te-IN',6,600)
+        self.assertEqual(s.route_mode,'original')
+        self.source(p,'hi-IN',7,700)
+        self.assertEqual(s.route_mode,'translated')
+
+    async def test_partial_and_duplicate_segments_cannot_confirm_original(self):
+        p,s=self.pipeline()
+        with patch('anyvoice.session.time.monotonic',return_value=1000):self.source(p,'te-IN',1,100)
+        for i in range(1,5):
+            with patch('anyvoice.session.time.monotonic',return_value=1000+i):
+                self.source(p,'te-IN',1,100,text='changed '+str(i))
+        self.assertEqual(s.route_mode,'detecting')
+        self.source(p,'te-IN',2,200,False);self.source(p,'te-IN',3,300,False)
+        self.assertEqual(s.route_mode,'detecting')
+
+    async def test_fixed_hindi_source_ignores_wrong_detector_labels(self):
+        s=Session(source_language='hi-IN',source_languages=('hi-IN',))
+        p=Pipeline(configured(),s,transport=SimpleNamespace());self.addCleanup(s.audio.close)
+        self.source(p,'te-IN',1,100)
+        p.receive_caption(json.dumps(caption(identity=1)).encode())
+        self.assertEqual(s.route_mode,'translated');self.assertEqual(s.detected_language,'hi-IN')
+        self.assertEqual(p.phrases.qsize(),1)
 
     async def test_old_active_generation_cannot_publish_after_language_switch(self):
         epoch=1;started=asyncio.Event();finish=asyncio.Event();errors=[]

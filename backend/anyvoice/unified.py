@@ -24,6 +24,9 @@ class UnifiedPipeline(BubblePipeline):
   if direct:self.direct=direct
   if direct_b:self.direct_b=direct_b
   session.voice_provider='murf-direct';session.route_mode='detecting';session.route_epoch=0
+  if session.source_language!='auto':
+   session.route_mode='original' if self.is_target_language(session.source_language) else 'translated'
+   session.detected_language=session.source_language
   session.bubble_state='listening' if session.input_mode=='bubble' else 'standby';self.last_caption=0
   if session.input_mode=='bubble':session.route_mode='translated';session.route_epoch=1
   self.media_started_ms=time.time()*1000
@@ -145,6 +148,8 @@ class UnifiedPipeline(BubblePipeline):
     self.media_started_ms=time.time()*1000
     self.language_segments.clear();self.pending_translations.clear();self.route_votes=None;self.candidate=None
     self.latest_source_offset=-1;s.detected_language='';s.route_mode='detecting';s.bubble_state='standby';s.message='Detecting media language'
+    if s.source_language!='auto':
+     s.detected_language=s.source_language;s.route_mode='original' if self.is_target_language(s.source_language) else 'translated'
    self.log.info('input_switched session=%s mode=%s last_sequence=%d acknowledged=%d',s.id[:8],s.input_mode,s.audio.next_sequence-1,s.audio.acknowledged)
 
  async def run(self):

@@ -117,6 +117,8 @@ public final class MainActivity extends Activity {
             if(checking||LiveTranslation.isStopping())return;
             stopPreview();if(ListeningState.running)command(ListeningService.STOP);else preflight();
         });space(hero,12);hero.addView(new VoiceVolumeView(this,LIME,this::applyPreviewVolume));space(root,18);
+        action(root,"Video language · "+profile.sourceLanguageName(),0xffedf2e3,GREEN,v->sourceLanguageDialog());
+        label(root,"If a video mixes languages or sounds incorrect, choose its main spoken language. This only changes media translation.",12,MUTED,400);space(root,18);
         LinearLayout voiceCard=card(root);LinearLayout vr=row();voiceCard.addView(vr);
         BrandView voiceIcon=new BrandView(this,false,GREEN);voiceIcon.setBackground(shape(0xffedf2e3,14));vr.addView(voiceIcon,new LinearLayout.LayoutParams(dp(45),dp(45)));
         LinearLayout voiceInfo=column();LinearLayout.LayoutParams vi=new LinearLayout.LayoutParams(0,-2,1);vi.setMargins(dp(13),0,0,0);vr.addView(voiceInfo,vi);
@@ -201,6 +203,24 @@ public final class MainActivity extends Activity {
         TextView connection=action(fields,"Demo connection",0xffedf2e3,GREEN,v->connectionSettings());connection.setEnabled(!ListeningState.running);
         label(fields,"Any Voice · "+BuildConfig.VERSION_NAME+"\nBuilt for Build with Agora — Bengaluru 2026\nPowered by Agora RTC and Murf Falcon",12,MUTED,400);
         AlertDialog dialog=new AlertDialog.Builder(this).setView(fields).setNegativeButton("Close",null).setPositiveButton("Save",null).create();dialog.setOnShowListener(v->dialog.getButton(-1).setOnClickListener(w->{if(name.getText().toString().trim().isEmpty()){name.setError("Enter your name");return;}profile.identity(name.getText().toString(),gender[0]);dialog.dismiss();home();}));dialog.show();
+    }
+    private void sourceLanguageDialog(){
+        if(ListeningState.running||BubbleState.enabled){toast("Disable Any Voice before changing the video language.");return;}
+        toast("Loading source languages…");
+        new Thread(()->{
+            try{
+                org.json.JSONArray rows=new BackendClient(this).capabilities().getJSONArray("source_language_options");
+                String[] names=new String[rows.length()+1],codes=new String[rows.length()+1];names[0]="Auto-detect";codes[0]="auto";
+                int selected=0;
+                for(int i=0;i<rows.length();i++){org.json.JSONObject item=rows.getJSONObject(i);names[i+1]=item.getString("name");codes[i+1]=item.getString("locale");if(codes[i+1].equals(profile.sourceLanguage()))selected=i+1;}
+                final int checked=selected;
+                runOnUiThread(()->{if(isFinishing()||isDestroyed())return;
+                    new AlertDialog.Builder(this).setTitle("Video’s spoken language").setSingleChoiceItems(names,checked,(dialog,index)->{
+                        if(ListeningState.running||BubbleState.enabled){dialog.dismiss();toast("Disable Any Voice first.");return;}
+                        profile.sourceLanguage(codes[index],names[index]);dialog.dismiss();home();
+                    }).setNegativeButton("Cancel",null).show();});
+            }catch(Exception error){runOnUiThread(()->toast("Could not load source languages. Check the backend connection."));}
+        },"source-languages").start();
     }
     private void genderControls(LinearLayout parent,String[] selected){
         LinearLayout choices=row();parent.addView(choices);ArrayList<TextView> chips=new ArrayList<>();

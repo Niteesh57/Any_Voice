@@ -14,6 +14,9 @@ final class UserProfile {
     String voice() { return prefs.getString("voice", ""); }
     String voiceName() { return prefs.getString("voice_name", "Choose voice"); }
     String voiceGender() { return prefs.getString("voice_gender", ""); }
+    String sourceLanguage() { return prefs.getString("source_language", "auto"); }
+    String sourceLanguageName() { return prefs.getString("source_language_name", "Auto-detect"); }
+    void sourceLanguage(String locale,String name) { prefs.edit().putString("source_language",locale).putString("source_language_name",name).apply(); }
     void identity(String name,String gender) { prefs.edit().putString("name",name.trim()).putString("gender",gender).apply(); }
     void selection(String language,String languageName,String nativeName,String voice,String voiceName,String gender) {
         prefs.edit().putString("language",language).putString("language_name",languageName).putString("native_name",nativeName)

@@ -138,7 +138,7 @@ class Pipeline:
         self.candidate = None
         self.route_votes = None
         if session.source_language != "auto":
-            session.route_mode = "translated"
+            session.route_mode = "original" if self.is_target_language(session.source_language) else "translated"
             session.detected_language = session.source_language
 
     def fail(self, message):
@@ -179,25 +179,30 @@ class Pipeline:
         if isinstance(offset, (int,float)): self.latest_source_offset = offset
         session = self.session
         wanted = "original" if self.is_target_language(language) else "translated"
-        confirmed = session.route_mode == "detecting" or wanted == session.route_mode
-        if not confirmed:
-            votes=self.route_votes
-            if votes is None or votes[0]!=wanted:self.route_votes=(wanted,{identity},now)
-            else:
-                votes[1].add(identity)
-                confirmed=len(votes[1])>=2 and now-votes[2]>=.6
-        else:self.route_votes=None
+        # Unmuting the source is asymmetric: a false target-language detection leaks
+        # untranslated audio. Require consecutive FINAL segments, including startup.
+        # A non-target result cancels votes immediately, rather than letting scattered
+        # target-language results accumulate across unrelated speech.
+        confirmed = wanted == "translated"
+        if wanted == "original":
+            confirmed = session.route_mode == "original"
+            if not confirmed and item.get("final"):
+                votes = self.route_votes
+                if votes is None:
+                    self.route_votes = (wanted, {identity}, now)
+                else:
+                    votes[1].add(identity)
+                    confirmed = len(votes[1]) >= 3 and now - votes[2] >= 2
+            if not confirmed:
+                self.log.info("language_confirmation session=%s candidate=%s action=keep_muted finals=%d",
+                    session.id[:8], language, len(self.route_votes[1]) if self.route_votes else 0)
+        else:
+            self.route_votes = None
         if confirmed and session.route_mode != wanted:
             session.route_epoch += 1
             session.route_mode = wanted
             self.log.info("language_route session=%s language=%s mode=%s epoch=%d",
                 session.id[:8],language,session.route_mode,session.route_epoch)
-            if wanted == 'translated':
-                for segment_id,(segment_language,_) in list(self.language_segments.items()):
-                    if self.route_votes and segment_id in self.route_votes[1]:
-                        self.language_segments[segment_id]=(segment_language,session.route_epoch)
-                        pending=self.pending_translations.pop(segment_id,None)
-                        if pending:self.accept_translation(pending)
             self.route_votes=None
         if confirmed:session.detected_language = language
         session.message = "Your language detected - original audio" if session.route_mode=='original' else "Translating to your language"
@@ -320,7 +325,7 @@ class Pipeline:
                 await self.completion.open()
                 await self.services.open()
             self.session.touched = time.monotonic()
-            self.session.state, self.session.message = "ready", "Bubble is listening. Ask a question." if self.session.mode == "bubble" else "Detecting language - original audio" if self.session.source_language == "auto" else "Listening to English"
+            self.session.state, self.session.message = "ready", "Bubble is listening. Ask a question." if self.session.mode == "bubble" else "Detecting media language" if self.session.source_language == "auto" else "Listening to selected source language"
             self.session.ready.set()
             self.work = [asyncio.create_task(coro) for coro in (
                 self.speak_phrases(), self.monitor(), self.session.stopped.wait(),

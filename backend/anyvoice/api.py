@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 from .config import Settings
-from .voices import VoiceCatalog, agora_locale
+from .voices import VoiceCatalog, agora_locale, AGORA_LANGUAGES
 from .providers import ProviderError
 from .rtc import native_available
 from .session import Pipeline, Session, token_for
@@ -104,11 +104,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.20", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.21", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.20"}
+        return {"service": "Any Voice", "version": "0.21"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -127,6 +127,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 "memory_tools": True,
                 "bubble_configured": bool(settings.dashscope_key and settings.bubble_llm_url and settings.bubble_llm_model),
                 "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_selection": "voice-library",
+                "source_language_options": [{"locale":code,"name":name} for code,name in sorted(AGORA_LANGUAGES.items(),key=lambda row:row[1])],
                 "message": "Ready" if not missing and native else "Configure provider credentials and run the Linux worker"}
 
     @app.get("/v1/voices", dependencies=[Depends(auth)])
@@ -165,8 +166,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         if any(len(k)>200 or len(v)>100 for k,v in request.device_apps.items()):raise HTTPException(422,"Invalid app capabilities")
         if request.mode in ("bubble","unified") and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
             raise HTTPException(503,"Configure Bubble Qwen credentials on the backend")
-        if request.source_language not in ("auto", "en-IN") or not agora_locale(request.target_language):
-            raise HTTPException(422, "Select a supported output language")
+        if (request.source_language != "auto" and not agora_locale(request.source_language)) or not agora_locale(request.target_language):
+            raise HTTPException(422, "Select supported source and output languages")
         try:
             settings.validate()
         except ValueError as exc:
@@ -188,8 +189,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
             session = Session(owner=owner,screen_tools=request.screen_tools,timezone=request.timezone,device_apps=request.device_apps,memory_store=memory,mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
                 target_language=agora_locale(request.target_language), voice_locale=request.target_language, voice_id=request.voice_id,
-                source_language=request.source_language,
-                source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else ("en-IN",))
+                source_language="auto" if request.source_language == "auto" else agora_locale(request.source_language),
+                source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else (agora_locale(request.source_language),))
             if request.mode == "bubble":
                 session.source_languages=("en-IN",)  # Command audio goes directly to Qwen, without an STT bot.
             sessions[session.id] = session

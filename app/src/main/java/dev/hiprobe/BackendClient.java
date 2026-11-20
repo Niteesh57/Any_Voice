@@ -57,7 +57,7 @@ final class BackendClient {
     boolean configured() { return !base.isEmpty() && !access.isEmpty(); }
     JSONObject capabilities() throws Exception { return request("GET", "/v1/capabilities", null); }
     JSONObject start() throws Exception {
-        return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
+        return request("POST", "/v1/sessions", new JSONObject().put("source_language", profile.sourceLanguage()).put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
     }
     JSONObject startBubble() throws Exception {
         // Media recall comes from the device-scoped backend transcript, not a stale UI caption pair.
@@ -67,7 +67,7 @@ final class BackendClient {
     }
     JSONObject startUnified(boolean media) throws Exception {
         return request("POST","/v1/sessions",new JSONObject().put("mode","unified").put("input_mode",media?"media":"bubble")
-            .put("source_language","auto").put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","murf-direct")
+            .put("source_language",profile.sourceLanguage()).put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","murf-direct")
             .put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(context).apps()).put("screen_tools",ScreenTools.authorized(context)));
     }
     void input(String id,boolean media)throws Exception{request("POST","/v1/sessions/"+id+"/input",new JSONObject().put("mode",media?"media":"bubble"));}

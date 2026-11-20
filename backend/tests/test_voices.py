@@ -58,12 +58,13 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
   s=Session(source_language="auto",target_language="ja-JP",voice_locale="ja-JP",voice_id="selected-id",source_languages=("en-IN","ja-JP"))
   p=Pipeline(configured(),s,transport=SimpleNamespace());self.addCleanup(s.audio.close)
   self.assertEqual(p.settings.voice,"selected-id");self.assertEqual(p.settings.target_locale,"ja-JP")
-  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"ja-JP","sentenceId":1,"offset":1,"text":"test","isFinal":True}}).encode())
+  for i in range(3):
+   with patch('anyvoice.session.time.monotonic',return_value=1000+i):
+    p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"ja-JP","sentenceId":10+i,"offset":i+1,"text":"test","isFinal":True}}).encode())
   self.assertEqual(s.route_mode,"original")
-  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":2,"offset":2,"text":"test","isFinal":True}}).encode())
+  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":2,"offset":4,"text":"test","isFinal":True}}).encode())
   p.receive_caption(json.dumps({"translation":{"uid":1001,"sentenceId":2,"results":[{"language":"ja-JP","texts":["translated"],"isFinal":True}]}}).encode())
-  p.route_votes=(p.route_votes[0],p.route_votes[1],p.route_votes[2]-1)
-  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":3,"offset":3,"text":"more speech","isFinal":True}}).encode())
+  p.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":3,"offset":5,"text":"more speech","isFinal":True}}).encode())
   self.assertEqual(p.phrases.get_nowait()[0],"translated")
   calls=[]
   async def respond(request):calls.append(json.loads(request.content));return httpx.Response(200,json={"agent_id":"fixture"})
@@ -93,5 +94,7 @@ class RegionalLanguageTests(unittest.IsolatedAsyncioTestCase):
   session=Session(source_language="auto",target_language="en-GB",voice_locale="en-UK",source_languages=("en-IN","en-GB"))
   pipeline=Pipeline(configured(),session,transport=SimpleNamespace())
   self.addCleanup(session.audio.close)
-  pipeline.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":1,"offset":1,"text":"test","isFinal":True}}).encode())
+  for i in range(3):
+   with patch('anyvoice.session.time.monotonic',return_value=1000+i):
+    pipeline.receive_caption(json.dumps({"transcript":{"uid":1001,"language":"en-IN","sentenceId":1+i,"offset":1+i,"text":"test","isFinal":True}}).encode())
   self.assertEqual(session.route_mode,"original")
