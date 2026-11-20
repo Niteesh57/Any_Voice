@@ -25,7 +25,7 @@ The difference is the connection between them. A translation can become context 
 <img src="docs/assets/voices.png" alt="Live compatible Murf voice choices" width="30%">
 <img src="docs/assets/conversation.png" alt="Active bidirectional translator and floating bubble" width="30%">
 </p>
-<p align="center"><sub>Actual screens from the OnePlus 7 demo build.</sub></p>
+<p align="center"><sub>Actual screens from the Android demo build.</sub></p>
 
 ## A demo worth showing
 
@@ -53,7 +53,7 @@ This walkthrough combines implemented features. The verification record separate
 | **Persistent memory + tool calling** | SQLite stores tasks, preferences, conversation turns and attributed translation text. Typed tools retrieve evidence, update tasks and request acknowledged Android actions. |
 | **Native Android + Python/FastAPI + Docker** | Playback capture, microphone, floating overlay, AudioTrack and opt-in accessibility connect the experience to the phone; the backend keeps provider credentials off the APK. |
 
-Agora’s [STT documentation](https://docs.agora.io/en/realtime-media/speech-to-text) describes transcription and translation over RTC. Murf’s [WebSocket documentation](https://murf.ai/api/docs/text-to-speech/web-sockets) describes persistent Falcon text/audio streaming. We use both as working parts of the experience. Agora Chat and IoT are not used in this build.
+Agora’s [STT documentation](https://docs.agora.io/en/realtime-media/speech-to-text) describes transcription and translation over RTC. Murf’s [WebSocket documentation](https://murf.ai/api/docs/text-to-speech/web-sockets) describes persistent Falcon text/audio streaming. We use both as working parts of the experience.
 
 ```mermaid
 flowchart LR
@@ -85,7 +85,7 @@ Recall uses bounded recent context and searchable records. It is not unlimited p
 | Evidence | Recorded result | What it establishes |
 |---|---|---|
 | **v0.20 backend regression checks** | **75 tests passed** | Ordering, identity isolation, persistence, voice compatibility, attribution and failure handling. |
-| **Native OnePlus 7 round trip** | Both English → Telugu and Telugu → English completed | Live Agora/Falcon integration and Android playback acknowledgments, using synthetic speech fixtures. |
+| **Native Android round trip** | Both English → Telugu and Telugu → English completed | Live Agora/Falcon integration and Android playback acknowledgments, using synthetic speech fixtures. |
 | **Connection reuse** | Same session across media → interpreter → media → Bubble → media | Mode changes can reuse connections instead of rebuilding the main session. |
 | **Controlled warm TTS comparison, v0.9** | **224 ms direct Falcon vs 579 ms Engine median time to first PCM** | Three identical Telugu texts, same host, alternating routes. About 61% lower first-PCM latency in this small comparison—not total translation latency. |
 | **Source disagreement check** | Video: two minutes; conversation: three minutes | A live Qwen response distinguished the instructions and attributed both sources. |
@@ -94,13 +94,19 @@ The TTS comparison is a historical component benchmark, not a v0.20 latency guar
 
 Read the [v0.20 verification record](docs/verification-0.20.md) and [timing/validation history](VALIDATION.md) for scope, methods and remaining checks. Android build and lint passed. Real two-person room noise, overlapping speech and every language/voice combination still need broader testing.
 
-## Why this matters beyond the demo
+## The connected device is already in your pocket
+
+A phone already has the microphone, speaker, screen and internet connection a voice companion needs. Any Voice brings them together so the device you carry every day can help you understand a lesson, remember an explanation or talk to someone in another language. You choose when to use it, without buying another gadget.
+
+Agora also brings real-time voice and video to smart devices through its [IoT SDK](https://docs.agora.io/en/realtime-media/iot/product-overview). Any Voice applies that connected-device idea to the mobile phone, using Agora’s Android RTC SDK and Conversational AI Engine. Our starting point is the phone itself; dedicated IoT hardware would be a future extension.
+
+## Everyday usefulness, with room to grow
 
 Creators and platforms already offer translation in different ways. Any Voice adds a personal layer across **compatible apps**, with one language preference and memory that follows the user’s questions. Translation happens when someone needs it; the experience does not require every creator to prepare every language beforehand.
 
-For Agora and Murf, this creates a plausible recurring-use loop: learning and entertainment bring users into translation; questions bring them into a voice companion; real conversations bring them back outside media. Agora supplies transport, transcription/translation and agent infrastructure. Murf supplies the voice people choose and hear repeatedly.
+Someone might first open Any Voice to understand a video. They return to ask about a recipe, learn from a tutorial or speak with someone they meet. The same companion remembers the context across these moments, giving people a reason to keep using it.
 
-An illustrative adoption scenario—**1,000 users × 10 minutes a day × 30 days = 300,000 user listening minutes per month**—shows the engagement opportunity. This is not observed adoption, billable provider minutes or a revenue forecast. Provider usage, speech duration, pricing and retention would determine commercial results. The next useful metrics are repeat use, end-to-end delay, task completion, translation quality and cost per completed workflow.
+That everyday use is also the business opportunity for Agora and Murf. Each translation or conversation uses Agora’s real-time services and Murf’s generated voice. As more people find the app useful and return to it, demand for those services can grow with them. A paid plan could support longer translation sessions and more assistant use, with pricing shaped by the actual cost of delivering them. The value people pay for is simple: understanding more, remembering what matters and getting things done in their own language.
 
 ## Try Any Voice
 
@@ -108,7 +114,7 @@ An illustrative adoption scenario—**1,000 users × 10 minutes a day × 30 days
 
 <img src="docs/assets/download-qr.svg" alt="Scan to download the Any Voice 0.20 Android APK" width="160">
 
-**Android 10+ · ARM64 demo build · tested on OnePlus 7.** Scan the QR on your phone or use the download link. This is a debug hackathon APK, not a Play Store release. It needs an online configured backend; downloading it alone does not provide a hosted service.
+**Android 10+ · ARM64 demo build.** Scan the QR on your phone or use the download link. This is a debug hackathon APK, not a Play Store release. It needs an online configured backend; downloading it alone does not provide a hosted service.
 
 Install, open **Profile → Demo connection**, and enter the backend URL and app access token supplied by the person running the demo. Choose your language and a compatible voice, preview it, then enable Any Voice. Grant playback capture/overlay/microphone access for the features you use; Screen assist requires a separate accessibility grant. Conversation translation starts only when you explicitly enable it and stops on lock.
 
