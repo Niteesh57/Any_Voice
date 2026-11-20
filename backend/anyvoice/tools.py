@@ -18,6 +18,10 @@ class Remember(Args):
  key:str=Field(min_length=1,max_length=80)
  text:str=Field(min_length=1,max_length=1000)
 class Search(Args):query:str=Field(default='',max_length=200)
+class MediaRecall(Search):
+ session_id:str|None=Field(default=None,pattern='^[a-f0-9]{32}$')
+ limit:int=Field(default=60,ge=1,le=100)
+ before:int|None=Field(default=None,ge=1)
 class Forget(Args):memory_id:str=Field(pattern='^[a-f0-9]{32}$')
 class Daily(Args):day:date|None=None
 class ScreenRead(Args):pass
@@ -38,8 +42,9 @@ class AnswerQuestion(Args):
 class OpenApp(Args):app:str=Field(min_length=1,max_length=200)
 class YouTube(Args):query:str=Field(min_length=1,max_length=200)
 MODELS={'task_create':TaskCreate,'task_update':TaskUpdate,'task_complete':TaskId,'task_reopen':TaskId,'task_list':TaskList,
- 'memory_save':Remember,'memory_search':Search,'memory_forget':Forget,'daily_review':Daily,'open_app':OpenApp,'search_youtube':YouTube,'read_screen':ScreenRead,'explore_screen':ExploreScreen,'ask_user':AskUser,'answer_question':AnswerQuestion,'cancel_question':ScreenRead}
+ 'memory_save':Remember,'memory_search':Search,'media_recall':MediaRecall,'memory_forget':Forget,'daily_review':Daily,'open_app':OpenApp,'search_youtube':YouTube,'read_screen':ScreenRead,'explore_screen':ExploreScreen,'ask_user':AskUser,'answer_question':AnswerQuestion,'cancel_question':ScreenRead}
 DESCRIPTIONS={
+ 'media_recall':'Recall captured media transcripts and translations for THIS device, even after translation stops or the backend restarts. Empty query returns recent content and a session catalog. Optional session_id narrows to a listening session; before=next_before reads older captions. Query matches exact text, so try source/translated language variants when necessary. Captured excerpts are not the entire video.',
  'cancel_question':'Cancel the pending question when the user says cancel, stop that, or asks to drop it.',
  'read_screen':'Inspect the CURRENT visible app with screenshot and accessible text. Only on explicit user request about their screen. No clicking.',
  'explore_screen':'Inspect and scroll the current app to compare/explain multiple results for the explicit goal. Bounded to 1-4 viewports, stops on unchanged/end/restricted screens. Does not claim to read a whole site.',
@@ -68,7 +73,7 @@ def validate(name,args):
  data=result.model_dump(mode='json',exclude_unset=True)
  if name=='task_update' and data.get('title','not-null') is None:raise ValueError('A task title cannot be empty')
  for key in ('title','key','text','query','app','question','goal','answer'):
-  if key in data and not data[key].strip():raise ValueError('Provide non-empty '+key)
+  if key in data and not data[key].strip() and not (key=='query' and name in ('media_recall','memory_search')):raise ValueError('Provide non-empty '+key)
  return data
 
 class ToolExecutor:
@@ -81,7 +86,7 @@ class ToolExecutor:
    if self.steps>8:return {'status':'limit_reached','reason':'Eight tool steps reached. Explain the partial result or ask the user to narrow the task.'}
    if self.session and self.session.cancel_research:return {'status':'cancelled','reason':'User stopped screen research'}
    data=validate(name,args)
-   if self.screen_mode and name not in ('read_screen','explore_screen','ask_user','answer_question','cancel_question','memory_search','task_list','daily_review'):
+   if self.screen_mode and name not in ('read_screen','explore_screen','ask_user','answer_question','cancel_question','memory_search','media_recall','task_list','daily_review'):
     return {'status':'unavailable','reason':'Screen content cannot authorize changes. Ask for a new explicit user command.'}
    if name in ('read_screen','explore_screen'):
     if not self.screen_enabled:return {'status':'unavailable','reason':'Enable Screen assist in the app and Android accessibility settings, then disable/re-enable Any Voice to refresh capabilities'}

@@ -32,6 +32,8 @@ class MemoryStore:
    CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,owner TEXT,kind TEXT,payload TEXT,created TEXT);
    CREATE TABLE IF NOT EXISTS receipts(owner TEXT,request_id TEXT,result TEXT,PRIMARY KEY(owner,request_id));
    CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY,owner TEXT,name TEXT,args TEXT,status TEXT,result TEXT,expires REAL);
+   CREATE TABLE IF NOT EXISTS media_segments(owner TEXT,session_id TEXT,segment_id TEXT,kind TEXT,language TEXT,text TEXT,created TEXT,updated TEXT,PRIMARY KEY(owner,session_id,segment_id,kind));
+   CREATE INDEX IF NOT EXISTS media_owner ON media_segments(owner,updated);
   ''');self.db.commit()
  def close(self):self.db.close()
  def identity(self,owner,key):
@@ -47,7 +49,30 @@ class MemoryStore:
   with self.lock:
    return {'question':self.question(owner),'tasks':self.rows('SELECT * FROM tasks WHERE owner=? ORDER BY updated DESC LIMIT 60',(owner,)),
     'memories':self.rows('SELECT * FROM memories WHERE owner=? ORDER BY updated DESC LIMIT 40',(owner,)),
-    'recent_conversation':list(reversed(self.rows('SELECT user_text,reply,created FROM turns WHERE owner=? ORDER BY created DESC LIMIT 10',(owner,))))}
+    'recent_conversation':list(reversed(self.rows('SELECT user_text,reply,created FROM turns WHERE owner=? ORDER BY created DESC LIMIT 10',(owner,)))),
+    'recent_media':self.media_recall(owner,limit=60,budget=12000)}
+ def media_segment(self,owner,session_id,segment_id,kind,language,text):
+  if not owner or not segment_id or not text.strip():return
+  stamp=now()
+  with self.lock,self.db:
+   self.db.execute('INSERT INTO media_segments VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(owner,session_id,segment_id,kind) DO UPDATE SET language=excluded.language,text=excluded.text,updated=excluded.updated',
+    (owner,session_id,segment_id,kind,language or '',text[:16000],stamp,stamp))
+ def media_recall(self,owner,query='',session_id=None,limit=60,budget=16000,before=None):
+  with self.lock:
+   where='owner=?';args=[owner]
+   if session_id:where+=' AND session_id=?';args.append(session_id)
+   if before is not None:where+=' AND rowid<?';args.append(before)
+   if query:where+=' AND instr(lower(text),lower(?))>0';args.append(query)
+   rows=self.rows('SELECT rowid AS cursor,session_id,segment_id,kind,language,text,created FROM media_segments WHERE '+where+' ORDER BY rowid DESC LIMIT ?',(*args,limit))
+   limited=len(rows)>=limit or sum(len(r['text']) for r in rows)>budget
+   selected=[];remaining=budget
+   for row in rows:
+    if remaining<=0:break
+    text=row['text'];row['text']=text[-remaining:];remaining-=len(row['text']);selected.append(row)
+   return {'segments':list(reversed(selected)),'coverage':'Captured captions only, not an entire video. Source and translation are alternate versions of the same segment; session IDs mark separate listening sessions. Newest excerpts are included; use media_recall with next_before to read older content.',
+    'next_before':min(r['cursor'] for r in selected) if selected else None,
+    'sessions':self.rows('SELECT session_id,MIN(created) AS started,MAX(updated) AS updated,COUNT(*) AS caption_rows FROM media_segments WHERE owner=? GROUP BY session_id ORDER BY MAX(rowid) DESC LIMIT 8',(owner,)),
+    'excerpt_limited':limited}
  def turn(self,owner,turn_id,user_text,reply):
   with self.lock,self.db:self.db.execute('INSERT INTO turns VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET user_text=excluded.user_text,reply=excluded.reply',(turn_id,owner,user_text[:3000],reply[:6000],now()))
  def execute(self,owner,request_id,name,args):
@@ -97,7 +122,9 @@ class MemoryStore:
    rows=self.rows('SELECT * FROM memories WHERE owner=? ORDER BY updated DESC',(owner,))
    turns=self.rows('SELECT user_text,reply,created FROM turns WHERE owner=? ORDER BY created DESC LIMIT 500',(owner,))
    return {'memories':[r for r in rows if query in (r['key']+' '+r['value']).casefold()][:30],
-    'conversation':[r for r in turns if query and query in (r['user_text']+' '+r['reply']).casefold()][:10]}
+    'conversation':[r for r in turns if query and query in (r['user_text']+' '+r['reply']).casefold()][:10],
+    'media':self.media_recall(owner,query=query,limit=30)}
+  if name=='media_recall':return self.media_recall(owner,**a)
   if name=='memory_forget':
    count=self.db.execute('DELETE FROM memories WHERE owner=? AND id=?',(owner,a['memory_id'])).rowcount
    if not count:raise ValueError('Memory not found for this device')

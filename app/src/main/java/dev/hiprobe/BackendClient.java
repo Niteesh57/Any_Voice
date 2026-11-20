@@ -60,8 +60,8 @@ final class BackendClient {
         return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
     }
     JSONObject startBubble() throws Exception {
-        String context=ListeningState.sourceText+"\n"+ListeningState.translatedText;
-        if(context.length()>8000)context=context.substring(context.length()-8000);
+        // Media recall comes from the device-scoped backend transcript, not a stale UI caption pair.
+        String context="";
         return request("POST", "/v1/sessions",new JSONObject().put("mode","bubble").put("source_language","auto")
             .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context).put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(this.context).apps()).put("screen_tools",ScreenTools.authorized(this.context)));
     }

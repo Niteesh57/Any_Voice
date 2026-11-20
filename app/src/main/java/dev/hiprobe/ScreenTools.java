@@ -27,7 +27,7 @@ final class ScreenTools {
     }
     static boolean authorized(Context c){return optedIn(c)&&configured(c);}
     static boolean enabled(Context c){return authorized(c)&&ScreenAccessService.connected!=null;}
-    static String state(Context c){if(!optedIn(c))return "Screen assist off in Any Voice";if(!configured(c))return "Screen access off in Android · open Screen assist settings";if(ScreenAccessService.connected==null)return "Screen assist enabled · waiting for service connection";return "Screen assist ready · reads only when you ask";}
+    static String state(Context c){if(!optedIn(c))return "Screen assist off in Any Voice";if(!configured(c))return "Screen access off in Android \u00b7 open Screen assist settings";if(ScreenAccessService.connected==null)return "Screen assist enabled \u00b7 waiting for service connection";return "Screen assist ready \u00b7 reads only when you ask";}
     static void setEnabled(Context c,boolean enabled){if(!enabled)cancel();c.getSharedPreferences("screen_assist",Context.MODE_PRIVATE).edit().putBoolean("enabled",enabled).apply();}
     static void cancel(){cancelledScope=currentScope;clearResults();}
     private static <T>T onMain(Callable<T> call)throws Exception{FutureTask<T> task=new FutureTask<>(call);new Handler(Looper.getMainLooper()).post(task);try{return task.get(3,TimeUnit.SECONDS);}catch(Exception e){task.cancel(false);throw e;}}

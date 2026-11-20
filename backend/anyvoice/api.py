@@ -58,7 +58,7 @@ class DeviceResult(BaseModel):
 
 class ManualTool(BaseModel):
     request_id: str = Field(min_length=8,max_length=100)
-    name: Literal["task_create","task_update","task_complete","task_reopen","task_list","memory_save","memory_search","memory_forget"]
+    name: Literal["task_create","task_update","task_complete","task_reopen","task_list","memory_save","memory_search","media_recall","memory_forget"]
     arguments: dict
 
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available, bubble_factory=BubblePipeline):
@@ -93,11 +93,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.17", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.18", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.17"}
+        return {"service": "Any Voice", "version": "0.18"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():

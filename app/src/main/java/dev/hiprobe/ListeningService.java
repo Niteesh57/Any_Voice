@@ -7,7 +7,6 @@ import android.media.*;
 import android.media.projection.*;
 import android.os.*;
 import org.json.JSONObject;
-import java.util.ArrayDeque;
 
 /** One user-enabled capture owner, one floating panel and one cloud input at a time. */
 public final class ListeningService extends Service {
@@ -18,7 +17,6 @@ public final class ListeningService extends Service {
     private static final String CHANNEL="probe";
     private final Handler main=new Handler(Looper.getMainLooper());
     private final AutoModePolicy policy=new AutoModePolicy();
-    private final ArrayDeque<short[]> mediaBuffer=new ArrayDeque<>();
     private VolumeGuard volume;
     private MediaProjection projection;
     private AudioRecord recorder,microphone;
@@ -76,13 +74,11 @@ public final class ListeningService extends Service {
             double energy=0;for(int i=0;i<count;i++)energy+=(double)samples[i]*samples[i];double rms=Math.sqrt(energy/count)/32768.;double db=rms>0?Math.max(-96,20*Math.log10(rms)):-96;
             long now=SystemClock.elapsedRealtime();synchronized(policy){policy.observe(db,now);}
             ListeningState.db=db;ListeningState.frames++;
-            synchronized(mediaBuffer){
-                mediaBuffer.addLast(java.util.Arrays.copyOf(samples,count));
-                boolean forced,mediaPending;synchronized(policy){forced=policy.forced(now);mediaPending=policy.wantsMedia(now);}
-                int limit=mediaMode||mediaPending?1000:100;while(mediaBuffer.size()>limit)mediaBuffer.removeFirst();
-                LiveTranslation rtc=connection;
-                if(mediaMode&&joined&&rtc!=null&&!forced){short[] frame=mediaBuffer.pollFirst();if(frame!=null){rtc.send(frame,frame.length);double sum=0;for(short sample:frame)sum+=(double)sample*sample;if(Math.sqrt(sum/frame.length)>58)lastSentMediaSignal=now;}}
-            }
+            // Live edge only: frames captured before the new RTC connection is ready are discarded.
+            // Replaying pre-switch audio at capture speed creates a backlog that can never catch up.
+            boolean forced;synchronized(policy){forced=policy.forced(now);}
+            LiveTranslation rtc=connection;
+            if(mediaMode&&joined&&rtc!=null&&!forced){rtc.send(samples,count);if(rms*32768>58)lastSentMediaSignal=now;}
             if(db>-60){if(ListeningState.replacing)ListeningState.mutedSignalFrames++;else ListeningState.audibleSignalFrames++;}
         }}catch(Exception e){if(capturing)main.post(()->finish("Capture stopped: "+e.getMessage()));}
     }
@@ -104,6 +100,7 @@ public final class ListeningService extends Service {
     private void openConnection(boolean media){
         if(!capturing||connection!=null||LiveTranslation.isStopping())return;
         mediaMode=media;modeSince=SystemClock.elapsedRealtime();long generation=++attempt;joined=false;hadAnswer=false;
+        if(media){setReplacement(true);ListeningState.sourceText="";ListeningState.translatedText="";}
         BubbleState.active=!media;BubbleState.inputAllowed=false;BubbleState.phase="connecting";
         ListeningState.message=media?"Connecting media translation":"Connecting Bubble";BubbleState.message=ListeningState.message;
         try{
@@ -130,7 +127,8 @@ public final class ListeningService extends Service {
     }
     private void askBubble(){
         if(!capturing)return;
-        long now=SystemClock.elapsedRealtime();synchronized(policy){if(policy.forced(now)){policy.automatic();}else policy.ask(now);}
+        long now=SystemClock.elapsedRealtime();boolean asking;synchronized(policy){asking=!policy.forced(now);if(asking)policy.ask(now);else policy.automatic();}
+        if(asking&&mediaMode){closeConnection();volume.mute();}
     }
     private void setReplacement(boolean enabled){if(enabled)volume.mute();else volume.restore();ListeningState.replacing=enabled;}
     private final Runnable tick=new Runnable(){public void run(){
@@ -168,7 +166,6 @@ public final class ListeningService extends Service {
         ScreenTools.cancel();capturing=false;ListeningState.running=false;ListeningState.manualConversation=false;BubbleState.enabled=false;BubbleState.translationPending=false;BubbleState.waitingForReply=false;BubbleState.screenBusy=false;
         closeConnection();main.removeCallbacksAndMessages(null);
         if(recorder!=null){try{recorder.stop();}catch(RuntimeException ignored){}if(captureThread!=null)try{captureThread.join(1000);}catch(InterruptedException e){Thread.currentThread().interrupt();}recorder.release();recorder=null;}captureThread=null;
-        synchronized(mediaBuffer){mediaBuffer.clear();}
         if(projection!=null){projection.unregisterCallback(projectionCallback);projection.stop();projection=null;}
         if(floating!=null){floating.close();floating=null;}ListeningState.db=-96;stopForeground(STOP_FOREGROUND_REMOVE);
     }

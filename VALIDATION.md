@@ -144,3 +144,12 @@ Debug follow-up: UI hierarchy inspection itself temporarily suppressed accessibi
 - Backend: 59 tests passed. Android debug build and lint passed. Updated backend container and APK installed. New spoken ambiguous-command behavior still needs user testing; native list/search and guard regression were verified.
 - Rollback APK: `dist/AnyVoice-rollback-before-app-routing.apk`; image: `anyvoice-backend:rollback-before-app-routing`; stopped prior container: `anyvoice-backend-before-app-routing`.
 
+# 0.18 live handoff and media recall — 2026-11-20
+
+- Removed the historical capture queue; new RTC media sessions receive live frames only. Media is muted at connection start and explicit Ask Bubble immediately closes the media connection instead of draining old translation into the conversation handoff.
+- Added installation-scoped persistent source/translation caption records, prefix upserts, recent context, session catalog and paginated `media_recall`. Removed the Android latest-caption-pair context shortcut.
+- Backend: 62 tests passed, including restart, prefix deduplication, cross-device isolation, wrong-participant/partial rejection, assistant exclusion, bounded context and complete cursor traversal. Android debug build/lint passed. Fixed three pre-existing non-UTF-8 separator bytes in ScreenTools with Java Unicode escapes.
+- Live Linux integration: generated cooking speech uploaded over Agora RTC; Agora produced 10 source/translation records; direct Murf produced 221 voice packets. After closing/reopening SQLite, real Qwen answered a spoken cooking-video question in Telugu with the captured steps and no invented ingredients.
+- A separate real-model test recalled an earlier Maggi session despite a newer C++ session. These use synthetic audio and isolated test memory, not the user's history.
+- Updated Docker and installed 0.18 on OnePlus. A fresh user-driven Android media-to-microphone switch still needs a listening check; the full native server pipeline was tested separately.
+

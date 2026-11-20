@@ -196,7 +196,12 @@ class Pipeline:
                 self.log.info("latency session=%s stage=speech_end_to_translation ms=%.0f",
                     self.session.id[:8],time.time()*1000-end_ms)
             self.session.translated = item["text"]
+            self.remember_media(item,"translation",self.session.target_language)
             self.phrases.put_nowait((delta,time.monotonic(),epoch))
+
+    def remember_media(self,item,kind,language):
+        if self.session.mode == 'translation' and self.session.memory_store and self.session.owner:
+            self.session.memory_store.media_segment(self.session.owner,self.session.id,item['id'],kind,language,item['text'])
 
     def receive_caption(self, data):
         if self.session.stopped.is_set(): return
@@ -204,6 +209,7 @@ class Pipeline:
             for item in decode_message(data,self.session.source_uid,self.session.target_language):
                 if item["kind"] == "source":
                     self.session.source = item["text"]
+                    if item.get("final"):self.remember_media(item,"source",item.get("language"))
                     if self.session.source_language == "auto": self.route_source(item)
                 else: self.accept_translation(item)
         except Exception as exc:
