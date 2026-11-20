@@ -98,12 +98,18 @@ public final class ListeningService extends Service {
         micThread=new Thread(()->{short[] samples=new short[320],silence=new short[320];try{while(micCapturing&&generation==attempt){int count=source.read(samples,0,samples.length,AudioRecord.READ_BLOCKING);if(!micCapturing||generation!=attempt)break;if(count<0)throw new IllegalStateException("Microphone read failed");if(count==0)continue;
             boolean allowMicrophone;synchronized(policy){allowMicrophone=policy.microphoneAllowed(SystemClock.elapsedRealtime());}
             LiveTranslation rtc=connection;if(rtc!=null){
-                if(ConversationState.active)rtc.sendConversation(ConversationState.requested&&ConversationState.listening&&rtc.microphoneSafe()&&unlocked()?samples:silence,count);
+                if(ConversationState.active){
+                    boolean ready=ConversationState.requested&&ConversationState.listening&&rtc.microphoneSafe()&&unlocked();
+                    if(ready&&!ConversationState.readyToListen)android.util.Log.i("AnyVoiceConversation","microphone_ready");
+                    ConversationState.readyToListen=ready;
+                    rtc.sendConversation(ready?samples:silence,count);
+                }
                 else rtc.sendMicrophone(!ConversationState.busy()&&BubbleState.inputAllowed&&allowMicrophone&&!mediaMode&&!requestedMedia&&unlocked()?samples:silence,count);
             }
         }}catch(Exception e){if(micCapturing&&generation==attempt)main.post(()->{if(generation==attempt)finish("Microphone stopped. Enable Any Voice again.");});}},"BubbleMicrophone");micThread.start();
     }
     private void stopMicrophone(){
+        ConversationState.readyToListen=false;
         micCapturing=false;if(microphone!=null){try{microphone.stop();}catch(RuntimeException ignored){}if(micThread!=null)try{micThread.join(700);}catch(InterruptedException e){Thread.currentThread().interrupt();}microphone.release();microphone=null;}micThread=null;
     }
     private void openConnection(boolean media){
@@ -125,6 +131,7 @@ public final class ListeningService extends Service {
                     boolean actualMedia="media".equals(data.optString("input_mode","media"));
                     boolean actualConversation="bidir".equals(data.optString("input_mode"));
                     ConversationState.active=actualConversation;ConversationState.listening=data.optBoolean("conversation_listening");
+                    if(!actualConversation||!ConversationState.listening)ConversationState.readyToListen=false;
                     if(actualConversation){ConversationState.message=data.optString("message");ConversationState.source=data.optString("source_text");ConversationState.translated=data.optString("translated_text");ConversationState.speaker=data.optString("conversation_speaker");ConversationState.id=data.optString("conversation_id");}
                     if(!actualConversation&&ConversationState.stopping&&!"bidir".equals(data.optString("desired_input"))){ConversationState.clear();ConversationState.message="Stopped. Previous mode restored.";}
                     main.post(()->{if(generation!=attempt||!capturing)return;

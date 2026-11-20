@@ -31,10 +31,8 @@ public final class ConversationActivity extends Activity {
     private final Runnable refresh=new Runnable(){public void run(){
         boolean busy=ConversationState.busy();text(start,ConversationState.stopping?"Finishing…":busy?"Stop":preparing?"Preparing…":"Start");start.setEnabled(!ConversationState.stopping&&!preparing&&!LiveTranslation.isStopping());
         languagePicker.setEnabled(!busy&&!preparing);voicePicker.setEnabled(!busy&&!preparing);partner.setEnabled(!busy&&!preparing);
-        String message=ConversationState.message;
-        String lower=message.toLowerCase(Locale.ROOT);
-        boolean normal=!(lower.contains("failed")||lower.contains("error")||lower.contains("unavailable")||lower.contains("lost"))&&(message.startsWith("Choose")||lower.contains("listening")||lower.contains("speaking")||message.startsWith("Conversation")||message.startsWith("Translating"));
-        text(state,ConversationState.stopping?"Finishing…":preparing||ConversationState.requested?"Connecting…":busy&&normal?(ConversationState.listening?"Listening":"Speaking"):!busy&&normal?"Ready":message);
+        text(state,ConversationState.status(preparing));
+        state.setContentDescription(ConversationState.status(preparing));
         text(original,ConversationState.source);text(translation,ConversationState.translated);
         original.setVisibility(ConversationState.source.isEmpty()?View.GONE:View.VISIBLE);translation.setVisibility(ConversationState.translated.isEmpty()?View.GONE:View.VISIBLE);animation.active(busy||preparing);
         handler.postDelayed(this,300);
