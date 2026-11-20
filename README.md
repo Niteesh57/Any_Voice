@@ -148,3 +148,21 @@ Android playback capture works only where the source app permits it. Protected c
 Screen assist reads and scrolls with explicit permission. It does not tap, type, buy, send messages or place calls. YouTube search opens results; the user selects the video. Captured memory covers what the app heard, not an entire unseen video or its automatically identified title. The current backend is a single-active-session hackathon deployment, not a multi-user production service.
 
 </details>
+
+## Why we believe this is the beginning
+
+We see Any Voice as an **agentic language companion**: it helps you understand something, remembers the context and can take a useful next step with you. Hearing a tutorial in your language is the start. Asking about it later, comparing it with advice from a conversation and turning that understanding into a task makes the experience much more useful.
+
+What feels new to us is bringing these moments together. Your media, conversations and everyday tasks usually live in separate tools. Any Voice connects them through a companion that knows where an explanation came from and can use that context when you ask for help. The ambition is to make that assistance available wherever you need it—across compatible apps today, and through more integrations and connected devices over time.
+
+That opens a broader opportunity than translating individual sentences. Students could learn from teachers who speak other languages. People travelling or working together could move from understanding a conversation to remembering an agreement and following through on it. Creators could reach people who would otherwise pass over their content. Language becomes less of a barrier to taking part.
+
+**The revenue potential comes from becoming useful often.** A personal subscription could offer longer sessions, more assistant use and richer memory. Education and workplace plans could support recurring learning and multilingual collaboration. In the longer term, an integration SDK could let other products offer the same combination of understanding, context and actions. These are possible business models, rather than features or revenue already delivered by this demo.
+
+For Agora and Murf, growth would come from those everyday experiences: more real-time sessions, more speech processed and more natural voice responses. For Any Voice, the opportunity is to build a service people return to because it helps them do something they care about. A large opportunity still has to be earned through reliable answers, useful actions, user trust and sustainable running costs.
+
+Our direction is simple: **wherever language gets in the way, let your companion help you understand, remember and act.**
+
+### Built by
+
+**B.V. Nagireddy** and **Manoj Kumar**
