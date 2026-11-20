@@ -18,7 +18,7 @@ Tasks & memory on the main screen shows saved tasks and facts. Check/uncheck a t
 
 ## Actual implementation
 
-The phone creates a stable private installation ID/key. Authenticated calls are scoped to that identity; a guessed ID without its key cannot access its records. A reinstall/data-clear creates a new identity, so it will not automatically recover the old records. There is no account recovery/export UI yet.
+The phone creates a stable private installation ID/key. The backend currently permits one active voice session globally, even though saved records are isolated per installation. Authenticated calls are scoped to that identity; a guessed ID without its key cannot access its records. A reinstall/data-clear creates a new identity, so it will not automatically recover the old records. There is no account recovery/export UI yet.
 
 SQLite stores normalized user text, replies, tasks, explicit memories, task events and retry receipts. Raw microphone audio is not persisted. The first Qwen audio call uses function calling to return a transcript, a direct reply or a bounded action plan. Typed arguments are validated before execution. Tool requests can make bounded follow-up lookup/action calls, then a result-grounded response is spoken through the existing Murf/Agora output path. Ordinary no-tool questions use the direct reply from that interpretation call.
 
@@ -51,7 +51,7 @@ The running service uses this volume. Deleting the volume deletes its database. 
 
 Real Murf-generated voice requests against Qwen saved a preference, created a task, completed it in a later client after database reopen, and requested app/YouTube actions with simulated phone acknowledgements. Measured model/tool response times in this one fixture run were approximately 5.2 s, 5.4 s, 4.4 s and 11.2 s respectively, excluding voice input duration and final spoken playback. These are not latency guarantees. Mutations may require a second model call; this feature adds work rather than promising faster replies.
 
-A native Agora RTC -> Qwen memory tool -> Murf -> queued playback/acknowledgement test completed successfully in about 12.6 seconds from the start of its spoken request to completed Telugu playback. Docker container recreation preserved an isolated test task. Real device UI, app launch and YouTube-search checks remain pending because ADB currently sees no phone.
+A native Agora RTC -> Qwen memory tool -> Murf -> queued playback/acknowledgement test completed successfully in about 12.6 seconds from the start of its spoken request to completed Telugu playback. Docker container recreation preserved an isolated test task. On-device verification subsequently passed: installed 0.16, checked memory/task tools using a separate test identity, opened Tasks & memory, and observed YouTube results for the supplied query. WhatsApp opens a normal/Clone chooser on this OnePlus; selecting normal WhatsApp opened its home activity. See VALIDATION.md.
 
 ## Rollback
 

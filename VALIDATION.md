@@ -113,3 +113,13 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 ## Memory and native tools 0.16 — 2026-11-20
 
 52 backend tests and Android assemble/lint passed. Live Qwen audio/function-calling tests saved a preference, created/completed a task across database/client reopen, and generated app/YouTube actions with simulated device acknowledgements. Native Agora RTC -> Qwen memory write -> selected-language Murf -> queued PCM/playback ACK passed (12.6 s request start to completed Telugu speech in one fixture). Docker container recreation retained an isolated test task. Real phone UI/app-search integration is unverified: ADB shows no device. Detailed latency boundaries and rollback are in docs/memory-tools.md.
+
+
+## On-device 0.16 verification — 2026-11-20
+
+- USB ADB restored after the phone re-enumerated as its composite MTP+ADB configuration. Installed dist/AnyVoice-0.16.apk and verified versionCode 16/versionName 0.16.
+- A separate instrumentation test identity used the phone's BackendClient to save/read a fact, create/complete/reopen a task, read from a fresh client, forget the fact and verify the real installation could not see the fixture data. All passed. Test records did not enter the user's Tasks & memory screen.
+- The main app's Tasks & memory screen loaded correctly and showed its empty-state guidance for the real installation.
+- The production DeviceTools path dispatched an app launch and a YouTube search. On-screen YouTube results showed the exact query relaxing Telugu music. WhatsApp raised the OnePlus normal/Clone chooser; selecting normal WhatsApp opened com.whatsapp.home.ui.HomeActivity. No message was sent and no chat contents were inspected.
+- Independent live backend isolation checks: two device identities read only their own saved facts; a correct device ID with the other identity's key returned 401. This is per-installation record isolation, not concurrent voice support: the backend still allows one active voice session globally.
+- Removed the instrumentation APK after testing and returned the phone to Any Voice. Android lint passed with the new repeatable DeviceSmokeInstrumentation harness. Spoken user interaction was not repeated in this phone check; the earlier native RTC/Qwen/Murf voice test remains the voice-path evidence.

@@ -5,6 +5,7 @@ android {
     buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId = "dev.hiprobe"
+        testInstrumentationRunner = "dev.hiprobe.DeviceSmokeInstrumentation"
         minSdk = 29
         targetSdk = 35
         versionCode = 16
