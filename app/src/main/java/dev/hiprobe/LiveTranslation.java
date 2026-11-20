@@ -328,7 +328,6 @@ final class LiveTranslation {
     void cancelResearch(){String id=sessionId;if(id!=null)new Thread(()->{try{backend.cancelResearch(id);}catch(Exception ignored){}},"CancelResearch").start();}
     void input(boolean media){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.input(sessionId,media);}catch(Exception e){if(!closed.get())fail("Could not switch audio input");}});}
     void startConversation(JSONObject config){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.startConversation(sessionId,config);}catch(Exception e){ConversationState.clear();ConversationState.message="Could not start translator: "+e.getMessage();}});}
-    void conversationTurn(String side){ConversationState.turnPending=true;ConversationState.readyToListen=false;network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.conversationTurn(sessionId,side);}catch(Exception e){ConversationState.turnError="Could not change turn. Try again.";}finally{ConversationState.turnPending=false;}});}
     void stopConversation(){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.stopConversation(sessionId);}catch(Exception e){if(!closed.get())fail("Could not stop conversation translator");}});}
     void close() {
         if (!closed.compareAndSet(false, true)) return;

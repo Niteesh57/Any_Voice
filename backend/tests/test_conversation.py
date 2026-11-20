@@ -89,51 +89,6 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
   self.source(t,1,'en-IN','Hello')
   self.translation(t,1,'en-IN','Hello')
   self.assertTrue(p.phrases.empty())
-
- async def test_numbers_keep_previous_direction_and_never_reverse_voice(self):
-  store=MemoryStore(':memory:');self.addCleanup(store.close);t,p=self.translator(store)
-  self.source(t,1,'te-IN','నీటిని ముందుగా మరిగించాలా?')
-  self.translation(t,1,'en-IN','Should I boil the water first?');p.phrases.get_nowait()
-  self.source(t,2,'en-IN','one seven')
-  phrase=p.phrases.get_nowait();self.assertEqual(phrase[0],'one seven')
-  self.assertEqual(phrase[3]['voice_id'],'their-selected-voice')
-  self.translation(t,2,'te-IN','ఒకటి ఏడు')
-  self.assertTrue(p.phrases.empty())
-  self.source(t,3,'en-IN','This is a complete clear English reply from the other person.')
-  self.translation(t,3,'te-IN','ఇది నా సమాధానం')
-  self.assertEqual(p.phrases.get_nowait()[3]['voice_id'],'my-selected-voice')
-
- async def test_manual_direction_and_provenance_survive_wrong_language_detection(self):
-  store=MemoryStore(':memory:');self.addCleanup(store.close);t,p=self.translator(store)
-  t.set_turn('my');self.source(t,1,'en-IN','seventeen')
-  self.assertEqual(p.phrases.get_nowait()[3]['voice_id'],'their-selected-voice')
-  t.set_turn('other');self.source(t,2,'te-IN','పదిహేడు')
-  self.assertEqual(p.phrases.get_nowait()[3]['voice_id'],'my-selected-voice')
-  self.assertEqual(t.session.conversation_turn,'other')
-  rows=store.media_recall(OWNER,source_kind='conversation')['segments']
-  self.assertTrue(all(row['speaker_basis']=='user_selected' for row in rows))
-  with self.assertRaises(ValueError):t.set_turn('invalid')
-
- async def test_manual_turn_boundary_rejects_late_source_captions(self):
-  store=MemoryStore(':memory:');self.addCleanup(store.close);t,p=self.translator(store)
-  t.set_turn('my');self.source(t,str(int(t.started)-1000),'te-IN','నీటిని ముందుగా మరిగించాలా?')
-  self.assertFalse(t.sources);self.assertTrue(p.phrases.empty())
-
- async def test_turn_api_validates_owner_active_mode_and_side(self):
-  from anyvoice.api import create_app
-  from test_pipeline import configured
-  store=MemoryStore(':memory:');self.addCleanup(store.close);t,p=self.translator(store)
-  p.conversation=t;p.session.pipeline=p
-  app=create_app(configured(),native_check=lambda:True);app.state.sessions['fixture']=p.session
-  headers={'Authorization':'Bearer '+configured().access_token,'X-AnyVoice-Device':OWNER,'X-AnyVoice-Device-Key':'a'*64}
-  async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://fixture') as client:
-   route='/v1/sessions/fixture/conversation/turn'
-   self.assertEqual((await client.post(route+'?side=my',headers={**headers,'X-AnyVoice-Device':'4'*32})).status_code,404)
-   self.assertEqual((await client.post(route+'?side=invalid',headers=headers)).status_code,422)
-   response=await client.post(route+'?side=my',headers=headers)
-   self.assertEqual(response.status_code,200);self.assertEqual(response.json()['conversation_turn'],'my')
-   p.session.input_mode='media'
-   self.assertEqual((await client.post(route+'?side=other',headers=headers)).status_code,409)
  async def test_evidence_keeps_video_and_conversation_separate_and_balanced(self):
   store=MemoryStore(':memory:');self.addCleanup(store.close)
   store.media_segment(OWNER,'1'*32,'same-id','source','en-IN','Cook noodles for two minutes.')

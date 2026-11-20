@@ -2,7 +2,6 @@
 import time
 import uuid
 import logging
-import unicodedata
 from .captions import decode_message,FinalizedCaptions
 
 class ConversationTranslator:
@@ -10,12 +9,6 @@ class ConversationTranslator:
   self.pipeline=pipeline;self.session=pipeline.session;self.config=config
   self.id=uuid.uuid4().hex;self.sources={};self.pending={};self.finals=FinalizedCaptions();self.started=time.time()*1000
   self.last_source_diagnostic=None
-  self.turn='auto';self.last_side=None;self.source_basis={}
-  self.session.conversation_turn='auto'
- def set_turn(self,side):
-  if side not in ('auto','my','other'):raise ValueError('Choose a valid conversation turn')
-  self.turn=side;self.session.conversation_turn=side
-  self.last_side=None;self.started=time.time()*1000;self.pending.clear()
  def receive(self,data):
   observed=False
   for target in (self.session.target_language,self.config['other_language']):
@@ -35,27 +28,17 @@ class ConversationTranslator:
   try:stamp=float(identity)
   except (TypeError,ValueError):stamp=0
   if stamp>1e12 and stamp<self.started:return
-  detected='my' if language.split('-')[0]==self.session.target_language.split('-')[0] else 'other' if language.split('-')[0]==self.config['other_language'].split('-')[0] else None
-  text=item['text'];letters=[c for c in text if c.isalpha() or unicodedata.category(c).startswith('M')]
-  ambiguous=len(text.split())<=2 or len(letters)<12
-  side=self.turn if self.turn!='auto' else self.last_side if self.last_side and ambiguous else detected
-  if side is None:return
-  existing=self.sources.get(identity)
-  if existing:side='my' if existing[1]==self.config['other_language'] else 'other'
-  self.last_side=side
-  self.source_basis[identity]='user_selected' if self.turn!='auto' else 'turn_inferred' if side!=detected else 'language_inferred'
-  if side=='my':
+  if language.split('-')[0]==self.session.target_language.split('-')[0]:
    speaker=self.config.get('my_name') or 'You';target=self.config['other_language'];voice=self.config['other_voice']
-  else:
+  elif language.split('-')[0]==self.config['other_language'].split('-')[0]:
    speaker=self.config.get('partner_name') or 'Other person';target=self.session.target_language;voice=self.session.voice_id
+  else:return
   self.sources[identity]=(speaker,target,voice,item['text']);self.remember(item,'source',language,speaker)
   pending=self.pending.pop((identity,target),None)
   if pending:self.translation(pending,target)
-  elif detected and side!=detected and language.split('-')[0]==target.split('-')[0]:
-   self.translation({'id':identity,'text':item['text']},target)
  def remember(self,item,kind,language,speaker):
   if self.session.owner and self.session.memory_store:
-   self.session.memory_store.media_segment(self.session.owner,self.id,item['id'],kind,language,item['text'],source_kind='conversation',speaker_label=speaker,speaker_basis=self.source_basis.get(item['id'],'language_inferred'),rtc_session_id=self.session.id)
+   self.session.memory_store.media_segment(self.session.owner,self.id,item['id'],kind,language,item['text'],source_kind='conversation',speaker_label=speaker,speaker_basis='language_inferred',rtc_session_id=self.session.id)
  def translation(self,item,target):
   if item.get('speech_end_ms') and item['speech_end_ms']<self.started:return
   identity=item['id'];source=self.sources.get(identity)

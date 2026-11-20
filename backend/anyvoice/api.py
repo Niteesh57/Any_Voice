@@ -104,11 +104,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.24", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.25", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.24"}
+        return {"service": "Any Voice", "version": "0.25"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -248,12 +248,6 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         except ValueError as exc:raise HTTPException(422,str(exc)) from exc
         except ProviderError as exc:raise HTTPException(502,str(exc)) from exc
         return session.public()
-
-    @app.post('/v1/sessions/{sid}/conversation/turn',dependencies=[Depends(auth)])
-    async def conversation_turn(sid:str,side:Literal['auto','my','other'],owner:str=Depends(device)):
-        session=scoped(sid,owner)
-        if session.mode!='unified' or session.input_mode!='bidir' or session.desired_input!='bidir' or session.stopped.is_set():raise HTTPException(409,'Start a conversation first')
-        session.pipeline.conversation.set_turn(side);return session.public()
 
     @app.post('/v1/sessions/{sid}/conversation/stop',dependencies=[Depends(auth)])
     async def stop_conversation(sid:str,owner:str=Depends(device)):

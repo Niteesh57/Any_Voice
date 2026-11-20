@@ -1,0 +1,11 @@
+# Conversation input repair — 0.25
+
+0.24's manual-turn controls and short-text direction heuristic were removed. Conversation returns to automatic language-based routing, retaining the readiness display from 0.23. This release does not claim the mixed-language direction ambiguity is solved.
+
+The failed phone sessions received conversation PCM but no recognition captions. Their five-second peak RMS levels were generally below about 515. A separate live Hindi fixture through the bidirectional RTC/STT/Falcon path succeeded at normal recorded levels (peak frame RMS around 10,000). A generated Hindi fixture attenuated to peak RMS 400 produced no stored source captions. A further fixture set to peak RMS 3,200 produced four source/translation segments and 125 PCM packets. The synthesized recordings were separate requests, not a formal same-waveform randomized benchmark. These tests implicate low input level; they do not prove it is the only possible cause of missing captions.
+
+Android now applies bounded gain only when publishing eligible microphone samples to the conversation track. It targets frame RMS 2,000, caps gain at 8×, smooths gain changes and limits peaks to approximately 30,000 in PCM16. Very low-level frames do not request a gain increase. Zero input stays zero. No gain is applied to media capture, Bubble microphone audio or speaker playback. Microphone stop resets gain; existing echo/playback input gates remain in place.
+
+Validation: 80 backend tests passed after removal of the four turn-control tests; debug build and lint passed. A standalone Java regression checked increased quiet-speech energy, peak safety and unchanged silence. APK 0.25 was installed and Docker updated with the previous conversation routing. A live phone check of normal speech is pending. No claim of a permanent recognition fix is made until that check succeeds.
+
+Previous releases remain available. The 0.24 state is tagged `anyvoice-v0.24-before-conversation-repair`; APK `dist/AnyVoice-rollback-0.24.apk`. For the earlier automatic UI, use the 0.23 checkpoint described in [the turn-change record](conversation-turns-0.24.md).
