@@ -1,12 +1,14 @@
 """Explicit interpreter; labels are inferred from language, not voice identity."""
 import time
 import uuid
+import logging
 from .captions import decode_message,FinalizedCaptions
 
 class ConversationTranslator:
  def __init__(self,pipeline,config):
   self.pipeline=pipeline;self.session=pipeline.session;self.config=config
   self.id=uuid.uuid4().hex;self.sources={};self.pending={};self.finals=FinalizedCaptions();self.started=time.time()*1000
+  self.last_source_diagnostic=None
  def receive(self,data):
   observed=False
   for target in (self.session.target_language,self.config['other_language']):
@@ -18,6 +20,10 @@ class ConversationTranslator:
   return observed
  def source(self,item):
   language=item.get('language','');identity=item.get('id')
+  diagnostic=(identity,language,bool(item.get('final')))
+  if diagnostic!=self.last_source_diagnostic:
+   logging.getLogger('uvicorn.error').info('conversation_caption session=%s language=%s final=%s chars=%d',self.session.id[:8],language,bool(item.get('final')),len(item.get('text','')))
+   self.last_source_diagnostic=diagnostic
   if not item.get('final') or not identity:return
   try:stamp=float(identity)
   except (TypeError,ValueError):stamp=0

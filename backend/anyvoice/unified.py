@@ -33,6 +33,7 @@ class UnifiedPipeline(BubblePipeline):
   self.conversation=None;self.previous_input='bubble';self.last_conversation_signal=0;self.conversation_rearm=0;self.conversation_blocked=False
   self.rtc.on_conversation_pcm=self.receive_conversation_pcm
   self.configuration_lock=asyncio.Lock()
+  self.conversation_frames=0;self.conversation_peak=0;self.conversation_report=0
 
  async def start_conversation(self,config):
   async with self.configuration_lock:await self._start_conversation(config)
@@ -52,7 +53,12 @@ class UnifiedPipeline(BubblePipeline):
 
  def receive_conversation_pcm(self,pcm):
   if self.session.input_mode=='bidir' and self.session.desired_input=='bidir' and pcm and not len(pcm)%2:
-   if audioop.rms(pcm,2)>120:self.last_conversation_signal=time.monotonic()
+   now=time.monotonic();level=audioop.rms(pcm,2)
+   self.conversation_frames+=1;self.conversation_peak=max(self.conversation_peak,level)
+   if level>120:self.last_conversation_signal=now
+   if now-self.conversation_report>=5:
+    self.log.info('conversation_input session=%s frames=%d peak_rms=%d listening=%s',self.session.id[:8],self.conversation_frames,self.conversation_peak,self.session.conversation_listening)
+    self.conversation_report=now;self.conversation_peak=0
 
  async def before_generate(self,chunk):
   if not chunk.conversation:return
