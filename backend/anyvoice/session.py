@@ -64,6 +64,7 @@ class Session:
     conversation_listening: bool = False
     conversation_speaker: str = ""
     conversation_direction: str = ""
+    conversation_turn: str = "auto"
     conversation_id: str = ""
 
     def public(self):
@@ -74,6 +75,7 @@ class Session:
                 "input_mode": self.input_mode, "desired_input": self.desired_input,
                 "conversation_listening":self.conversation_listening,"conversation_id":self.conversation_id,
                 "conversation_speaker":self.conversation_speaker,"conversation_direction":self.conversation_direction,
+                "conversation_turn":self.conversation_turn,
                 "input_allowed": (self.mode == "bubble" or self.mode == "unified" and self.input_mode == "bubble") and self.bubble_state in ("standby", "listening"),
                 "source_text": self.source, "translated_text": self.translated,
                 "phrases": self.phrases, "audio_frames": self.audio_frames,

@@ -24,6 +24,7 @@ public final class ConversationActivity extends Activity {
     private int selectedLanguage=-1,selectedVoice=-1;
     private EditText partner;
     private TextView state,original,translation,start;
+    private final ArrayList<TextView> turnButtons=new ArrayList<>();
     private BrandView animation;
     private UserProfile profile;
     private JSONObject pending;
@@ -32,6 +33,8 @@ public final class ConversationActivity extends Activity {
         boolean busy=ConversationState.busy();text(start,ConversationState.stopping?"Finishing…":busy?"Stop":preparing?"Preparing…":"Start");start.setEnabled(!ConversationState.stopping&&!preparing&&!LiveTranslation.isStopping());
         languagePicker.setEnabled(!busy&&!preparing);voicePicker.setEnabled(!busy&&!preparing);partner.setEnabled(!busy&&!preparing);
         text(state,ConversationState.status(preparing));
+        for(int i=0;i<turnButtons.size();i++){TextView button=turnButtons.get(i);boolean selected=new String[]{"auto","my","other"}[i].equals(ConversationState.turn);button.setEnabled(ConversationState.active&&!ConversationState.stopping);button.setSelected(selected);button.setTextColor(selected?-1:MainActivity.GREEN);button.setBackground(shape(selected?MainActivity.GREEN:0xffeaf0e4));}
+        if(!ConversationState.turnError.isEmpty()){toast(ConversationState.turnError);ConversationState.turnError="";}
         state.setContentDescription(ConversationState.status(preparing));
         text(original,ConversationState.source);text(translation,ConversationState.translated);
         original.setVisibility(ConversationState.source.isEmpty()?View.GONE:View.VISIBLE);translation.setVisibility(ConversationState.translated.isEmpty()?View.GONE:View.VISIBLE);animation.active(busy||preparing);
@@ -49,6 +52,9 @@ public final class ConversationActivity extends Activity {
         voicePicker.setOnClickListener(v->{if(ConversationState.busy()||preparing)return;ArrayList<String> names=new ArrayList<>();for(JSONObject row:voices)names.add(row.optString("name")+" · "+row.optString("gender"));if(names.isEmpty()){toast("Choose a language first");return;}ChoiceSheet.show(this,"Their voice",names,selectedVoice,index->{if(ConversationState.busy()||preparing)return;selectedVoice=index;voicePicker.setText(names.get(index)+"  ⌄");});});
         partner=new EditText(this);partner.setHint("Their name (optional)");partner.setText(getSharedPreferences("conversation_settings",MODE_PRIVATE).getString("partner_name",""));partner.setSingleLine(true);partner.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(40)});root.addView(partner,new LinearLayout.LayoutParams(-1,dp(56)));
         partner.setTextSize(14);partner.setTextColor(MainActivity.INK);partner.setHintTextColor(MainActivity.MUTED);
+        LinearLayout turns=new LinearLayout(this);root.addView(turns,new LinearLayout.LayoutParams(-1,dp(52)));
+        String[] turnNames={"Auto","My turn","Their turn"},sides={"auto","my","other"};
+        for(int i=0;i<turnNames.length;i++){final String side=sides[i];TextView button=new TextView(this);button.setText(turnNames[i]);button.setTextSize(14);button.setGravity(Gravity.CENTER);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-1,1);lp.setMargins(dp(3),0,dp(3),0);turns.addView(button,lp);turnButtons.add(button);button.setOnClickListener(v->startService(new Intent(this,ListeningService.class).setAction("dev.hiprobe.CONVERSATION_TURN").putExtra("side",side)));}
         TextView info=label(root,"Take turns  ·  ⓘ",12);info.setTextColor(MainActivity.GREEN);info.setMinHeight(dp(48));info.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Conversation mode").setMessage("Take turns. Listening pauses while the translated voice plays.\n\nText is saved privately for this phone so Bubble can recall it. Names are inferred from language, not verified identities.\n\nLocking stops this mode. Media translation and Bubble resume when you stop the conversation.").setPositiveButton("Got it",null).show());
         animation=new BrandView(this,false,MainActivity.GREEN,true);root.addView(animation,new LinearLayout.LayoutParams(-1,dp(96)));
         state=label(root,ConversationState.message,14);start=label(root,"Start conversation",18);start.setGravity(Gravity.CENTER);start.setTextColor(-1);start.setBackground(shape(MainActivity.GREEN));root.addView(new VoiceVolumeView(this,MainActivity.GREEN,()->{}));

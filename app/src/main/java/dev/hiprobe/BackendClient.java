@@ -73,6 +73,7 @@ final class BackendClient {
     void input(String id,boolean media)throws Exception{request("POST","/v1/sessions/"+id+"/input",new JSONObject().put("mode",media?"media":"bubble"));}
     void startConversation(String id,JSONObject config)throws Exception{request("POST","/v1/sessions/"+id+"/conversation/start",config);}
     void stopConversation(String id)throws Exception{request("POST","/v1/sessions/"+id+"/conversation/stop",new JSONObject());}
+    void conversationTurn(String id,String side)throws Exception{request("POST","/v1/sessions/"+id+"/conversation/turn?side="+side,new JSONObject());}
     void cancelResearch(String id) throws Exception{request("POST","/v1/sessions/"+id+"/cancel-research",new JSONObject());}
     JSONObject overview() throws Exception{return request("GET","/v1/me/overview",null);}
     JSONObject tool(String name,JSONObject args) throws Exception{return request("POST","/v1/me/tools",new JSONObject().put("request_id",java.util.UUID.randomUUID().toString()).put("name",name).put("arguments",args));}
