@@ -52,7 +52,7 @@ public final class MainActivity extends Activity {
             updateText(source,ListeningState.sourceText.isEmpty()?"Your original speech appears here.":ListeningState.sourceText);
             updateText(translated,ListeningState.translatedText.isEmpty()?"Your translation appears here.":ListeningState.translatedText);
         }
-        if(screenStatus!=null)updateText(screenStatus,ScreenTools.state(MainActivity.this));
+        if(screenStatus!=null)updateText(screenStatus,"Screen assist · "+(ScreenTools.enabled(MainActivity.this)?"Ready":ScreenTools.authorized(MainActivity.this)?"Connecting":"Off"));
         handler.postDelayed(this,350);
     }};
     @Override public void onCreate(Bundle saved){
@@ -101,50 +101,35 @@ public final class MainActivity extends Activity {
         });space(root,30);hackathon(root);enter(root);
     }
     private void home(){
-        LinearLayout root=page();header(root,true);space(root,25);
-        TextView hello=label(root,"HELLO, "+profile.name().toUpperCase(Locale.ROOT),11,GREEN,700);hello.setLetterSpacing(.13f);
-        label(root,"Every voice.\nCloser to you.",35,INK,700).setLetterSpacing(-.04f);
-        label(root,"Listen in the language you call home.",14,MUTED,400);space(root,22);
+        LinearLayout root=page();header(root,true);space(root,18);
+        label(root,"Hi, "+profile.name()+".",26,INK,600);space(root,12);
         LinearLayout hero=column();hero.setPadding(dp(23),dp(23),dp(23),dp(22));hero.setBackground(shape(GREEN,28));root.addView(hero);
         TextView eyebrow=label(hero,"YOUR LISTENING LANGUAGE",10,LIME,700);eyebrow.setLetterSpacing(.13f);
         LinearLayout languageRow=row();hero.addView(languageRow);
         languageTitle=label(languageRow,profile.nativeName(),36,PAPER,600);languageTitle.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));
-        TextView change=chip("Change  ↗",PAPER,0x22ffffff);languageRow.addView(change,new LinearLayout.LayoutParams(dp(88),dp(40)));change.setOnClickListener(v->openVoices());
+        TextView change=chip("Voices  ⌄",PAPER,0x22ffffff);languageRow.addView(change,new LinearLayout.LayoutParams(dp(88),dp(48)));change.setOnClickListener(v->openVoices());
         voiceSummary=label(hero,profile.voice().isEmpty()?"Choose a language and a voice":profile.languageName()+"  ·  "+profile.voiceName()+"’s voice",13,0xffd0ded4,400);
-        wave=new BrandView(this,true,LIME);hero.addView(wave,new LinearLayout.LayoutParams(-1,dp(86)));
+        wave=new BrandView(this,true,LIME);hero.addView(wave,new LinearLayout.LayoutParams(-1,dp(58)));
         stateLabel=label(hero,"Ready when you are",12,0xffd0ded4,400);stateLabel.setGravity(Gravity.CENTER);space(hero,14);
         startLabel=action(hero,"Enable",PAPER,INK,v->{
             if(checking||LiveTranslation.isStopping())return;
             stopPreview();if(ListeningState.running)command(ListeningService.STOP);else preflight();
         });space(hero,12);hero.addView(new VoiceVolumeView(this,LIME,this::applyPreviewVolume));space(root,18);
         action(root,"Video language · "+profile.sourceLanguageName(),0xffedf2e3,GREEN,v->sourceLanguageDialog());
-        label(root,"If a video mixes languages or sounds incorrect, choose its main spoken language. This only changes media translation.",12,MUTED,400);space(root,18);
-        LinearLayout voiceCard=card(root);LinearLayout vr=row();voiceCard.addView(vr);
-        BrandView voiceIcon=new BrandView(this,false,GREEN);voiceIcon.setBackground(shape(0xffedf2e3,14));vr.addView(voiceIcon,new LinearLayout.LayoutParams(dp(45),dp(45)));
-        LinearLayout voiceInfo=column();LinearLayout.LayoutParams vi=new LinearLayout.LayoutParams(0,-2,1);vi.setMargins(dp(13),0,0,0);vr.addView(voiceInfo,vi);
-        label(voiceInfo,"Your voice, your choice",15,INK,600);label(voiceInfo,profile.voice().isEmpty()?"Explore voices and listen to a preview":profile.voiceName()+" · "+profile.voiceGender()+" · Conversational",12,MUTED,400);
-        label(vr,"↗",23,GREEN,400);voiceCard.setContentDescription("Choose language and voice, current voice "+profile.voiceName());voiceCard.setOnClickListener(v->openVoices());
-        space(root,12);
-        LinearLayout floating=card(root);LinearLayout fr=row();floating.addView(fr);
-        BrandView small=new BrandView(this,false,GREEN);fr.addView(small,new LinearLayout.LayoutParams(dp(42),dp(42)));
-        LinearLayout fi=column();LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(0,-2,1);fp.setMargins(dp(15),0,0,0);fr.addView(fi,fp);
-        label(fi,"Always within reach",15,INK,600);label(fi,Settings.canDrawOverlays(this)?"Drag the bubble. Tap for controls.":"Enable your floating shortcut",12,MUTED,400);
-        label(fr,"↗",23,GREEN,400);floating.setOnClickListener(v->{if(!Settings.canDrawOverlays(this))startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));else toast("Your single floating bubble appears when Any Voice is enabled.");});
+        if(!Settings.canDrawOverlays(this)){space(root,10);action(root,"Enable floating bubble  ↗",0xffedf2e3,GREEN,v->startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()))));}
         space(root,14);
-        action(root,"Screen assist  →",0xffedf2e3,GREEN,v->screenAssist());
-        screenStatus=label(root,"Checking screen access",12,MUTED,400);space(root,8);
-        action(root,"Tasks & memory  →",0xffedf2e3,GREEN,v->openMemory());space(root,12);
-        action(root,"Bidirectional translator  ⇄",GREEN,Color.WHITE,v->startActivity(new Intent(this,ConversationActivity.class)));space(root,12);
-        label(root,"One app. Three ways to listen.",20,INK,700);
-        label(root,"App audio takes priority for translation. After a quiet period, Bubble listens for your questions. Tap Ask Bubble in the floating controls to ask over a video.",13,MUTED,400);
-        label(root,"While enabled, the microphone is used in conversation mode only when unlocked. Locking pauses the microphone. Disable stops both modes.",11,MUTED,400);
-        space(root,20);
+        LinearLayout tools=row();root.addView(tools);TextView screen=action(tools,"Screen assist",0xffedf2e3,GREEN,v->screenAssist());TextView memory=action(tools,"Tasks & memory",0xffedf2e3,GREEN,v->openMemory());
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,dp(56),1);left.setMargins(0,dp(4),dp(6),dp(4));screen.setLayoutParams(left);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,dp(56),1);right.setMargins(dp(6),dp(4),0,dp(4));memory.setLayoutParams(right);screen.setTextSize(14);memory.setTextSize(14);
+        screenStatus=label(root,"",11,MUTED,400);space(root,8);
+        action(root,"Conversation  ⇄",GREEN,Color.WHITE,v->startActivity(new Intent(this,ConversationActivity.class)));space(root,8);
+        TextView help=label(root,"How it works  ⓘ",12,GREEN,500);help.setMinHeight(dp(48));help.setGravity(Gravity.CENTER_VERTICAL);help.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("Any Voice").setMessage("Media plays in your selected language. After a quiet period, Bubble can listen for a question. Tap Ask Bubble to ask over a video.\n\nFor mixed-language videos, choose the main spoken language under Video language.\n\nThe microphone pauses on lock. Disable stops listening. Same-language media can play in its original voice.").setPositiveButton("Got it",null).show());
         LinearLayout captions=column();root.addView(captions);TextView transcriptToggle=label(captions,"Live transcript   ⌄",13,GREEN,600);
         LinearLayout transcript=card(captions);transcript.setVisibility(View.GONE);
         label(transcript,"ORIGINAL",10,MUTED,700);source=label(transcript,"Your original speech appears here.",14,INK,400);
         label(transcript,profile.languageName().toUpperCase(Locale.ROOT),10,GREEN,700);translated=label(transcript,"Your translation appears here.",16,INK,500);
         transcriptToggle.setOnClickListener(v->{boolean hidden=transcript.getVisibility()==View.GONE;transcript.setVisibility(hidden?View.VISIBLE:View.GONE);transcriptToggle.setText(hidden?"Live transcript   ⌃":"Live transcript   ⌄");if(hidden)enter(transcript);});
-        label(root,"Already in your language? Hear the original voice.\nMedia translation uses app audio. Bubble uses your microphone only when enabled.",12,MUTED,400);space(root,24);hackathon(root);enter(root);
+        space(root,20);label(root,"BUILD WITH AGORA  ·  MURF AI  ·  KNOTiC",10,MUTED,500);enter(root);
     }
     private void screenAssist(){
         boolean enabled=ScreenTools.enabled(MainActivity.this);
@@ -215,10 +200,10 @@ public final class MainActivity extends Activity {
                 for(int i=0;i<rows.length();i++){org.json.JSONObject item=rows.getJSONObject(i);names[i+1]=item.getString("name");codes[i+1]=item.getString("locale");if(codes[i+1].equals(profile.sourceLanguage()))selected=i+1;}
                 final int checked=selected;
                 runOnUiThread(()->{if(isFinishing()||isDestroyed())return;
-                    new AlertDialog.Builder(this).setTitle("Video’s spoken language").setSingleChoiceItems(names,checked,(dialog,index)->{
-                        if(ListeningState.running||BubbleState.enabled){dialog.dismiss();toast("Disable Any Voice first.");return;}
-                        profile.sourceLanguage(codes[index],names[index]);dialog.dismiss();home();
-                    }).setNegativeButton("Cancel",null).show();});
+                    ChoiceSheet.show(this,"Video language",Arrays.asList(names),checked,index->{
+                        if(ListeningState.running||BubbleState.enabled){toast("Disable Any Voice first.");return;}
+                        profile.sourceLanguage(codes[index],names[index]);home();
+                    });});
             }catch(Exception error){runOnUiThread(()->toast("Could not load source languages. Check the backend connection."));}
         },"source-languages").start();
     }
@@ -245,18 +230,18 @@ public final class MainActivity extends Activity {
         LinearLayout sheet=column();sheet.setPadding(dp(22),dp(15),dp(22),dp(14));sheet.setBackground(shape(PAPER,28));
         View handle=new View(this);handle.setBackground(shape(0xffcbd4c9,4));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(36),dp(4));hp.gravity=Gravity.CENTER;hp.bottomMargin=dp(15);sheet.addView(handle,hp);
         LinearLayout title=row();sheet.addView(title);TextView heading=label(title,"Find your voice",25,INK,700);heading.setLayoutParams(new LinearLayout.LayoutParams(0,-2,1));TextView close=chip("×",INK,0xffe9ede3);title.addView(close,new LinearLayout.LayoutParams(dp(40),dp(40)));close.setContentDescription("Close voice selection");close.setOnClickListener(v->dialog.dismiss());
-        label(sheet,"Pick a language. Hear a voice. Make it yours.",13,MUTED,400);
         JSONArray languages=catalog.optJSONArray("languages"),voices=catalog.optJSONArray("voices");if(languages==null||voices==null){toast("Voice library unavailable");return;}
         ArrayList<JSONObject> languageRows=new ArrayList<>();ArrayList<String> names=new ArrayList<>();int chosen=0;
         for(int i=0;i<languages.length();i++){JSONObject language=languages.optJSONObject(i);if(language==null)continue;if(language.optString("id").equals(profile.language()))chosen=names.size();String localeCode=language.optString("agora_locale",language.optString("id"));Locale local=Locale.forLanguageTag(localeCode);String nativeLabel=local.getDisplayLanguage(local);if(!nativeLabel.isEmpty())try{language.put("native",nativeLabel);}catch(JSONException ignored){}languageRows.add(language);names.add(nativeLabel+"  ·  "+language.optString("name"));}
-        Spinner language=new Spinner(this);language.setPadding(dp(10),0,dp(8),0);language.setBackground(shape(Color.WHITE,14));language.setContentDescription("Choose listening language");ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);language.setAdapter(adapter);sheet.addView(language,new LinearLayout.LayoutParams(-1,dp(54)));language.setSelection(chosen);
+        if(languageRows.isEmpty()){toast("No compatible languages available");return;}
+        int[] languageIndex={chosen};TextView language=chip(names.get(chosen)+"  ⌄",INK,Color.WHITE);language.setGravity(Gravity.CENTER_VERTICAL);language.setPadding(dp(14),0,dp(14),0);language.setContentDescription("Choose listening language");sheet.addView(language,new LinearLayout.LayoutParams(-1,dp(54)));
         LinearLayout filter=row();sheet.addView(filter);String[] gender={"All"};ArrayList<TextView> filters=new ArrayList<>();
         sheet.addView(new VoiceVolumeView(this,GREEN,this::applyPreviewVolume));
         TextView count=label(sheet,"Loading voices…",12,MUTED,400);
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);LinearLayout list=column();scroll.addView(list);sheet.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         TextView detected=label(sheet,"",11,MUTED,400);
         Runnable render=()->{
-            stopPreview();list.removeAllViews();JSONObject lang=languageRows.get(language.getSelectedItemPosition());String locale=lang.optString("id");int number=0;
+            stopPreview();list.removeAllViews();JSONObject lang=languageRows.get(languageIndex[0]);String locale=lang.optString("id");int number=0;
             ArrayList<JSONObject> matches=new ArrayList<>();
             for(int i=0;i<voices.length();i++){JSONObject voice=voices.optJSONObject(i);if(voice==null)continue;JSONArray locales=voice.optJSONArray("locales");boolean supported=false;for(int j=0;locales!=null&&j<locales.length();j++)if(locale.equals(locales.optString(j)))supported=true;
                 if(supported&&(gender[0].equals("All")||gender[0].equalsIgnoreCase(voice.optString("gender"))))matches.add(voice);}
@@ -271,10 +256,10 @@ public final class MainActivity extends Activity {
             }
             count.setText(number+" voices · tap a card to select");
             JSONArray detection=lang.optJSONArray("detection");ArrayList<String> dn=new ArrayList<>();for(int i=0;detection!=null&&i<detection.length();i++){String id=detection.optString(i);for(JSONObject entry:languageRows)if(id.equals(entry.optString("agora_locale",entry.optString("id")))&&!dn.contains(Locale.forLanguageTag(id).getDisplayLanguage(Locale.ENGLISH)))dn.add(Locale.forLanguageTag(id).getDisplayLanguage(Locale.ENGLISH));}
-            detected.setText("Auto-detects "+android.text.TextUtils.join(", ",dn)+". Same-language audio keeps its original voice.");
+            detected.setText("Auto-detect: "+android.text.TextUtils.join(", ",dn));
         };
         for(String value:new String[]{"All","Male","Female"}){TextView item=chip(value,value.equals(gender[0])?Color.WHITE:INK,value.equals(gender[0])?GREEN:0xffe9ede3);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(40),1);lp.setMargins(0,dp(6),dp(6),dp(6));filter.addView(item,lp);filters.add(item);item.setOnClickListener(v->{gender[0]=value;for(TextView option:filters){boolean checked=option.getText().toString().equals(value);option.setTextColor(checked?Color.WHITE:INK);option.setBackground(shape(checked?GREEN:0xffe9ede3,14));}render.run();});}
-        language.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> parent,View view,int position,long id){render.run();}public void onNothingSelected(AdapterView<?> parent){}});
+        language.setOnClickListener(v->{stopPreview();ChoiceSheet.show(this,"Your language",names,languageIndex[0],index->{languageIndex[0]=index;language.setText(names.get(index)+"  ⌄");render.run();});});
         dialog.setOnKeyListener((d,key,event)->voiceVolume.key(event));dialog.setContentView(sheet);dialog.setOnDismissListener(v->{stopPreview();if(picker==dialog)picker=null;});Window window=dialog.getWindow();if(window!=null){window.setBackgroundDrawableResource(android.R.color.transparent);window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);window.setDimAmount(.32f);window.setGravity(Gravity.BOTTOM);window.setWindowAnimations(R.style.VoiceSheetAnimation);window.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.84));}
         dialog.show();if(window!=null)window.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.84));render.run();
     }
