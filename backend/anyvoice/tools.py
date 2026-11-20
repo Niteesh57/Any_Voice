@@ -72,8 +72,9 @@ def validate(name,args):
  return data
 
 class ToolExecutor:
- def __init__(self,store,owner,zone,apps,screen_enabled=False,session=None):
+ def __init__(self,store,owner,zone,apps,screen_enabled=False,session=None,user_text=''):
   self.store=store;self.owner=owner;self.zone=zone;self.apps=apps;self.screen_enabled=screen_enabled;self.session=session;self.screen_reads=0;self.screen_scrolls=0;self.steps=0;self.screen_mode=False;self.after_navigation=False
+  self.user_text=user_text
  async def execute(self,identity,name,args):
   try:
    self.steps+=1
@@ -101,6 +102,8 @@ class ToolExecutor:
     self.after_navigation=True
     if not self.apps:return {'status':'unavailable','reason':'Phone actions are not enabled for this client'}
     if name=='open_app' and data['app'] not in self.apps:return {'status':'unavailable','reason':'Use a supported app ID from this phone capability list'}
+    if name=='open_app' and any(word in self.user_text.casefold().replace(' ', '') for word in ('youtube','యూట్యూబ్')) and data['app']!='com.google.android.youtube':
+     return {'status':'needs_clarification','reason':'The user named YouTube. Do not open a different app. Use YouTube or ask the user to clarify.'}
     self.store.queue_action(self.owner,identity,name,data,time.time()+25)
     deadline=time.monotonic()+26
     while time.monotonic()<deadline:

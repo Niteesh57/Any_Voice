@@ -61,6 +61,14 @@ class StoreTests(unittest.TestCase):
   self.assertEqual(s.action_result(OWNER,'old')['status'],'expired')
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+ async def test_youtube_request_never_opens_contacts_or_browser(self):
+  s=MemoryStore(':memory:');self.addCleanup(s.close)
+  for text in ('Open YouTube and find a tutor','యూట్యూబ్ ఓపెన్ చేయి'):
+   tools=ToolExecutor(s,OWNER,'Asia/Kolkata',{'com.android.contacts':'Phone','com.android.chrome':'Chrome'},user_text=text)
+   for package in ('com.android.contacts','com.android.chrome'):
+    result=await tools.execute('d'*32+':0','open_app',{'app':package})
+    self.assertEqual(result['status'],'needs_clarification')
+   self.assertFalse(s.actions(OWNER))
  async def test_split_tool_json_creates_once_and_followup_survives_new_client(self):
   store=MemoryStore(':memory:');self.addCleanup(store.close);requests=[]
   plan={'user_text':'Remember to finish the presentation tomorrow','reply':'','actions':[{'name':'task_create','arguments':{'title':'Presentation','due_date':'2026-11-21'}}]}

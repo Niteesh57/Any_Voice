@@ -136,3 +136,11 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 - Updated APK 0.17 installed and backend Docker updated with its persistent memory volume. Screenshots remain ephemeral in production paths. A new complete user-spoken research request through the phone has not yet been confirmed; this report distinguishes native tool/model tests from that user listening check. See docs/screen-assist.md for limits and rollback.
 
 Debug follow-up: UI hierarchy inspection itself temporarily suppressed accessibility services (documented Android UiAutomation behavior), producing an artificial disconnected label while the Android switch remained on. Verified the live readiness label using a screenshot, switched final checks to non-restarting probes, and separated configured authorization from temporary reconnection in the native client. Cloud capability now follows configured authorization; each actual read/scroll still checks the live binding.
+# App routing correction — 2026-11-20
+
+- Phone had 106 launcher packages; the alphabetically sorted 100-package limit omitted YouTube. Raised native and API bounds to 512.
+- Recent stored turns falsely claimed YouTube was absent; an unclear utterance led the model to request `com.android.contacts`. Updated planning instructions to clarify unclear app names and prefer the current capability list over conversation history. Explicit YouTube transcripts cannot launch another app through `open_app`.
+- Found that YouTube accepted ACTION_SEARCH without displaying search results. Replaced it with an explicitly packaged HTTPS search deep link. Native on-phone test reported 106 apps including YouTube; screenshot confirmed C++ tutorial search results, rather than the home feed.
+- Backend: 59 tests passed. Android debug build and lint passed. Updated backend container and APK installed. New spoken ambiguous-command behavior still needs user testing; native list/search and guard regression were verified.
+- Rollback APK: `dist/AnyVoice-rollback-before-app-routing.apk`; image: `anyvoice-backend:rollback-before-app-routing`; stopped prior container: `anyvoice-backend-before-app-routing`.
+

@@ -20,7 +20,7 @@ final class DeviceTools {
         Intent launcher=new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> rows=context.getPackageManager().queryIntentActivities(launcher,0);
         rows.sort(Comparator.comparing(r->r.loadLabel(context.getPackageManager()).toString(),String.CASE_INSENSITIVE_ORDER));
-        for(ResolveInfo row:rows){String name=row.activityInfo.packageName;if(name.equals(context.getPackageName()))continue;try{apps.put(name,row.loadLabel(context.getPackageManager()).toString());}catch(JSONException ignored){}if(apps.length()>=100)break;}
+        for(ResolveInfo row:rows){String name=row.activityInfo.packageName;if(name.equals(context.getPackageName()))continue;try{apps.put(name,row.loadLabel(context.getPackageManager()).toString());}catch(JSONException ignored){}if(apps.length()>=512)break;}
         return apps;
     }
     JSONObject run(JSONObject action){
@@ -61,10 +61,10 @@ final class DeviceTools {
             }
             if(action.optString("name").equals("search_youtube")){
                 String query=args.optString("query").trim();if(query.isEmpty()||query.length()>200)return result("failed","Invalid search query");
-                Intent search=new Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube").putExtra(SearchManager.QUERY,query).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                Uri uri=new Uri.Builder().scheme("https").authority("www.youtube.com").appendPath("results").appendQueryParameter("search_query",query).build();
+                Intent search=new Intent(Intent.ACTION_VIEW,uri).setPackage("com.google.android.youtube").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 try{context.startActivity(search);return result("launch_requested","YouTube search requested; no video was selected or played");}
                 catch(ActivityNotFoundException e){
-                    Uri uri=new Uri.Builder().scheme("https").authority("www.youtube.com").appendPath("results").appendQueryParameter("search_query",query).build();
                     context.startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                     return result("browser_requested","YouTube search URL handed to Android; no playback verified");
                 }

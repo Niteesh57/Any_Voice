@@ -15,6 +15,14 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
         Bundle results=new Bundle();
         try{
             Context real=getTargetContext();
+            if("apps".equals(requestedMode)){
+                DeviceTools tools=new DeviceTools(real);JSONObject apps=tools.apps();
+                if(!apps.has("com.google.android.youtube"))throw new AssertionError("YouTube missing from native capabilities");
+                results.putInt("app_count",apps.length());results.putString("youtube_label",apps.getString("com.google.android.youtube"));
+                JSONObject search=tools.run(new JSONObject().put("id",java.util.UUID.randomUUID().toString().replace("-","")+":0").put("name","search_youtube").put("arguments",new JSONObject().put("query","C++ tutorial for beginners")));
+                if(!search.optString("status").equals("launch_requested"))throw new AssertionError(search.toString());
+                results.putString("youtube_search",search.toString());finish(-1,results);return;
+            }
             if("screen".equals(requestedMode)){
                 long deadline=android.os.SystemClock.elapsedRealtime()+120000;
                 while(ScreenAccessService.connected==null&&android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(200);

@@ -27,7 +27,7 @@ class StartRequest(BaseModel):
     mode: Literal["translation", "bubble"] = "translation"
     timezone: str = Field(default="Asia/Kolkata",max_length=80)
     screen_tools: bool = False
-    device_apps: dict[str,str] = Field(default_factory=dict,max_length=100)
+    device_apps: dict[str,str] = Field(default_factory=dict,max_length=512)
     context: str = Field(default="", max_length=8000)
     source_language: str = "auto"
     target_language: str = "te-IN"
