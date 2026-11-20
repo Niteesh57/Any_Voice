@@ -19,6 +19,7 @@ class Remember(Args):
  text:str=Field(min_length=1,max_length=1000)
 class Search(Args):query:str=Field(default='',max_length=200)
 class MediaRecall(Search):
+ source_kind:Literal['all','media','conversation']='all'
  session_id:str|None=Field(default=None,pattern='^[a-f0-9]{32}$')
  limit:int=Field(default=60,ge=1,le=100)
  before:int|None=Field(default=None,ge=1)

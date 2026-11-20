@@ -27,6 +27,7 @@ class AgoraTransport:
         self.connected = asyncio.Event()
         self.on_pcm = None
         self.on_input_pcm = None
+        self.on_conversation_pcm=None
 
     async def open(self, on_caption, on_speech, on_error):
         from agora.rtc.agora_service import AgoraService
@@ -49,12 +50,14 @@ class AgoraTransport:
 
         class CaptionObserver(IRTCLocalUserObserver):
             def on_stream_message(self, local, user_id, stream_id, data, length):
-                if str(user_id) == str(session.stt_uid):
+                if str(user_id) in (str(session.stt_uid),str(session.conversation_stt_uid)):
                     loop.call_soon_threadsafe(on_caption, bytes(data[:length]))
 
         class AudioObserver(IAudioFrameObserver):
             def on_playback_audio_frame_before_mixing(self, local, channel, uid, frame, vad_state, vad_audio):
                 input_uid=session.microphone_uid if session.mode=='unified' else session.source_uid
+                if str(uid)==str(session.conversation_uid) and owner.on_conversation_pcm:
+                    loop.call_soon_threadsafe(owner.on_conversation_pcm,bytes(frame.buffer))
                 if str(uid) == str(input_uid) and owner.on_input_pcm:
                     loop.call_soon_threadsafe(owner.on_input_pcm, bytes(frame.buffer))
                 if str(uid) == str(session.worker_uid):
@@ -89,6 +92,8 @@ class AgoraTransport:
         check(self.connection.get_local_user().subscribe_audio(str(session.worker_uid)), "subscribe to voice agent")
         if self.on_input_pcm:
             check(self.connection.get_local_user().subscribe_audio(str(session.microphone_uid if session.mode=='unified' else session.source_uid)), "subscribe to microphone source")
+        if self.on_conversation_pcm:
+            check(self.connection.get_local_user().subscribe_audio(str(session.conversation_uid)),"subscribe to conversation microphone")
 
     async def close(self):
         if self.connection:

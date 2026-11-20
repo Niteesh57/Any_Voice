@@ -66,6 +66,12 @@ class ManualTool(BaseModel):
 class InputRequest(BaseModel):
     mode: Literal['media','bubble']
 
+class ConversationRequest(BaseModel):
+    other_language:str=Field(max_length=24)
+    other_voice:str=Field(min_length=1,max_length=120)
+    my_name:str=Field(default='',max_length=40)
+    partner_name:str=Field(default='',max_length=40)
+
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available, bubble_factory=BubblePipeline):
     settings = settings or Settings.from_env()
     sessions = {}
@@ -98,11 +104,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.19", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.20", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.19"}
+        return {"service": "Any Voice", "version": "0.20"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -199,6 +205,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                         "channel": session.channel, "uid": session.source_uid, "worker_uid": session.worker_uid,
                         "token": token_for(settings, session, session.source_uid),
                         "microphone_uid":session.microphone_uid,
+                        "conversation_uid":session.conversation_uid,
+                        "conversation_token":token_for(settings,session,session.conversation_uid) if session.mode=='unified' else '',
                         "microphone_token":token_for(settings,session,session.microphone_uid) if session.mode=='unified' else '',
                         "max_seconds": settings.max_seconds}
             except BaseException as exc:
@@ -223,7 +231,28 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
     async def input_mode(sid:str,request:InputRequest,owner:str=Depends(device)):
         session=scoped(sid,owner)
         if session.mode!='unified' or session.stopped.is_set():raise HTTPException(409,'Unified session is not active')
+        if session.input_mode=='bidir' or session.desired_input=='bidir':raise HTTPException(409,'Stop bidirectional translation before switching modes')
         session.pipeline.request_input(request.mode);return session.public()
+
+    @app.post('/v1/sessions/{sid}/conversation/start',dependencies=[Depends(auth)])
+    async def start_conversation(sid:str,request:ConversationRequest,owner:str=Depends(device)):
+        session=scoped(sid,owner)
+        if session.mode!='unified' or session.stopped.is_set():raise HTTPException(409,'Enable Any Voice first')
+        target=agora_locale(request.other_language)
+        if not target or target.split('-')[0]==session.target_language.split('-')[0]:raise HTTPException(422,'Choose a different supported partner language')
+        try:
+            await catalog.validate(session.voice_id,session.voice_locale or session.target_language)
+            await catalog.validate(request.other_voice,request.other_language)
+            await session.pipeline.start_conversation({**request.model_dump(),'other_locale':request.other_language,'other_language':target})
+        except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+        except ProviderError as exc:raise HTTPException(502,str(exc)) from exc
+        return session.public()
+
+    @app.post('/v1/sessions/{sid}/conversation/stop',dependencies=[Depends(auth)])
+    async def stop_conversation(sid:str,owner:str=Depends(device)):
+        session=scoped(sid,owner)
+        if session.mode!='unified':raise HTTPException(409,'Unified session required')
+        session.pipeline.stop_conversation();return session.public()
 
     @app.post("/v1/sessions/{sid}/stop", dependencies=[Depends(auth)])
     async def stop(sid: str,owner: str = Depends(device)):

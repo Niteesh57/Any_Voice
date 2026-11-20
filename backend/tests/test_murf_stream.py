@@ -17,6 +17,37 @@ class Socket:
  async def close(self):self.closed=True
 
 class MurfStreamTests(unittest.IsolatedAsyncioTestCase):
+ async def test_capacity_close_without_json_before_audio_is_safe_to_retry(self):
+  class Closed(Exception):rcvd=SimpleNamespace(code=4029)
+  class Rejected(Socket):
+   async def recv(self):raise Closed()
+  raw=b'\x10\x27'*2400;opened=[];sockets=[Rejected([]),Socket([{'audio':base64.b64encode(raw).decode()},{'final':True}])]
+  async def connect(*args,**kwargs):ws=sockets[len(opened)];opened.append(ws);return ws
+  voice=MurfStream(configured(),connect=connect);received=[]
+  try:
+   await voice.synthesize('one phrase',received.append,lambda:None)
+   self.assertEqual(len(opened),2);self.assertEqual(len(received),1)
+  finally:await voice.close()
+ async def test_capacity_rejection_before_audio_retries_same_phrase_without_duplicate_output(self):
+  raw=b'\x10\x27'*2400
+  sockets=[Socket([{'error':'busy','error_code':'ACTIVE_CONTEXT_LIMIT_EXCEEDED'}]),Socket([{'audio':base64.b64encode(raw).decode()},{'final':True}])];opened=[]
+  async def connect(*args,**kwargs):ws=sockets[len(opened)];opened.append(ws);return ws
+  voice=MurfStream(configured(),connect=connect);audio=[]
+  try:
+   await voice.synthesize('same numbered phrase',audio.append,lambda:None,voice_id='selected-partner',locale='en-IN')
+   expected,_=audioop.ratecv(raw,2,1,24000,16000,None)
+   self.assertEqual(b''.join(audio),expected);self.assertEqual(len(opened),2)
+   self.assertTrue(sockets[0].closed)
+   self.assertEqual(sockets[1].sent[0]['voice_config']['voice_id'],'selected-partner')
+   self.assertEqual(sockets[1].sent[0]['voice_config']['locale'],'en-IN')
+  finally:await voice.close()
+ async def test_capacity_error_after_any_audio_is_never_retried(self):
+  raw=b'\x10\x27'*2400;ws=Socket([{'audio':base64.b64encode(raw).decode()},{'error':'busy','error_code':'ACTIVE_CONTEXT_LIMIT_EXCEEDED'}])
+  voice=MurfStream(configured());voice.ws=ws;received=[]
+  try:
+   with self.assertRaises(ProviderError):await voice.synthesize('do not repeat words',received.append,lambda:None)
+   self.assertTrue(received);self.assertEqual(len([e for e in ws.sent if 'text' in e]),1)
+  finally:await voice.close()
  async def test_auth_pcm_resampling_and_order_across_two_contexts(self):
   raw=(b'\x10\x27\xf0\xd8')*1200
   def audio(data):return {'audio':base64.b64encode(data).decode()}

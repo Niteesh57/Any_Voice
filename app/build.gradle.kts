@@ -8,8 +8,8 @@ android {
         testInstrumentationRunner = "dev.hiprobe.DeviceSmokeInstrumentation"
         minSdk = 29
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.19"
+        versionCode = 20
+        versionName = "0.20"
         val backendUrl = providers.gradleProperty("anyVoiceBackendUrl").orElse("").get()
         require(backendUrl.matches(Regex("[a-zA-Z0-9:/._-]*"))) { "Invalid backend URL" }
         buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$backendUrl\"")

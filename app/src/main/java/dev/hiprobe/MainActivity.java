@@ -132,7 +132,8 @@ public final class MainActivity extends Activity {
         action(root,"Screen assist  →",0xffedf2e3,GREEN,v->screenAssist());
         screenStatus=label(root,"Checking screen access",12,MUTED,400);space(root,8);
         action(root,"Tasks & memory  →",0xffedf2e3,GREEN,v->openMemory());space(root,12);
-        label(root,"One bubble. Two ways to listen.",20,INK,700);
+        action(root,"Bidirectional translator  ⇄",GREEN,Color.WHITE,v->startActivity(new Intent(this,ConversationActivity.class)));space(root,12);
+        label(root,"One app. Three ways to listen.",20,INK,700);
         label(root,"App audio takes priority for translation. After a quiet period, Bubble listens for your questions. Tap Ask Bubble in the floating controls to ask over a video.",13,MUTED,400);
         label(root,"While enabled, the microphone is used in conversation mode only when unlocked. Locking pauses the microphone. Disable stops both modes.",11,MUTED,400);
         space(root,20);
@@ -173,8 +174,19 @@ public final class MainActivity extends Activity {
                 TextView forget=action(content,"Forget",0xffedf2e3,GREEN,v->{});
                 forget.setOnClickListener(v->{forget.setEnabled(false);network.execute(()->{try{new BackendClient(this).tool("memory_forget",new JSONObject().put("memory_id",fact.optString("id")));handler.post(()->{value.setText("Removed");forget.setText("Forgotten");toast("Memory removed; previous conversational copies cleared");});}catch(Exception e){handler.post(()->{forget.setEnabled(true);toast(e.getMessage());});}});});
             }
+            evidenceSection(content,data.optJSONObject("recent_media"),"From media audio");
+            evidenceSection(content,data.optJSONObject("recent_translation_conversations"),"From translated conversations");
             ScrollView scroll=new ScrollView(this);scroll.addView(content);new AlertDialog.Builder(this).setView(scroll).setPositiveButton("Close",null).show();
         });}catch(Exception e){handler.post(()->toast(e.getMessage()));}});
+    }
+    private void evidenceSection(LinearLayout parent,JSONObject data,String title){
+        label(parent,title,17,INK,700);JSONArray rows=data==null?null:data.optJSONArray("segments");
+        if(rows==null||rows.length()==0){label(parent,"Nothing captured yet.",13,MUTED,400);return;}
+        for(int i=Math.max(0,rows.length()-6);i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null)continue;
+            String identity=row.optString("speaker_label","Video speaker")+("language_inferred".equals(row.optString("speaker_basis"))?" · speaker inferred from language":" · identity unknown");
+            label(parent,identity+" · "+row.optString("language")+" · "+row.optString("kind"),11,GREEN,600);
+            label(parent,row.optString("text"),14,INK,400);String captured=row.optString("created");try{captured=java.time.OffsetDateTime.parse(captured).atZoneSameInstant(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd MMM · h:mm a"));}catch(Exception ignored){}label(parent,captured,10,MUTED,400);
+        }
     }
     private void hackathon(LinearLayout parent){
         View line=new View(this);line.setBackgroundColor(LINE);parent.addView(line,new LinearLayout.LayoutParams(-1,dp(1)));space(parent,16);

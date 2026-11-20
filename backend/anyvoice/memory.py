@@ -34,6 +34,7 @@ class MemoryStore:
    CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY,owner TEXT,name TEXT,args TEXT,status TEXT,result TEXT,expires REAL);
    CREATE TABLE IF NOT EXISTS media_segments(owner TEXT,session_id TEXT,segment_id TEXT,kind TEXT,language TEXT,text TEXT,created TEXT,updated TEXT,PRIMARY KEY(owner,session_id,segment_id,kind));
    CREATE INDEX IF NOT EXISTS media_owner ON media_segments(owner,updated);
+   CREATE TABLE IF NOT EXISTS caption_provenance(owner TEXT,session_id TEXT,segment_id TEXT,kind TEXT,source_kind TEXT,speaker_label TEXT,speaker_basis TEXT,rtc_session_id TEXT,PRIMARY KEY(owner,session_id,segment_id,kind));
   ''');self.db.commit()
  def close(self):self.db.close()
  def identity(self,owner,key):
@@ -50,28 +51,43 @@ class MemoryStore:
    return {'question':self.question(owner),'tasks':self.rows('SELECT * FROM tasks WHERE owner=? ORDER BY updated DESC LIMIT 60',(owner,)),
     'memories':self.rows('SELECT * FROM memories WHERE owner=? ORDER BY updated DESC LIMIT 40',(owner,)),
     'recent_conversation':list(reversed(self.rows('SELECT user_text,reply,created FROM turns WHERE owner=? ORDER BY created DESC LIMIT 10',(owner,)))),
-    'recent_media':self.media_recall(owner,limit=60,budget=12000)}
- def media_segment(self,owner,session_id,segment_id,kind,language,text):
+    'recent_media':self.media_recall(owner,source_kind='media',limit=40,budget=8000),
+    'recent_translation_conversations':self.media_recall(owner,source_kind='conversation',limit=40,budget=8000)}
+ def media_segment(self,owner,session_id,segment_id,kind,language,text,source_kind='media',speaker_label='Video speaker',speaker_basis='unknown',rtc_session_id=''):
   if not owner or not segment_id or not text.strip():return
   stamp=now()
   with self.lock,self.db:
    self.db.execute('INSERT INTO media_segments VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(owner,session_id,segment_id,kind) DO UPDATE SET language=excluded.language,text=excluded.text,updated=excluded.updated',
     (owner,session_id,segment_id,kind,language or '',text[:16000],stamp,stamp))
- def media_recall(self,owner,query='',session_id=None,limit=60,budget=16000,before=None):
+   self.db.execute('INSERT INTO caption_provenance VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(owner,session_id,segment_id,kind) DO UPDATE SET speaker_label=excluded.speaker_label,speaker_basis=excluded.speaker_basis',
+    (owner,session_id,segment_id,kind,source_kind,speaker_label,speaker_basis,rtc_session_id))
+ def media_recall(self,owner,query='',session_id=None,limit=60,budget=16000,before=None,source_kind='all'):
   with self.lock:
    where='owner=?';args=[owner]
    if session_id:where+=' AND session_id=?';args.append(session_id)
-   if before is not None:where+=' AND rowid<?';args.append(before)
+   if source_kind!='all':where+=' AND source_kind=?';args.append(source_kind)
+   if before is not None:where+=' AND evidence_cursor<?';args.append(before)
    if query:where+=' AND instr(lower(text),lower(?))>0';args.append(query)
-   rows=self.rows('SELECT rowid AS cursor,session_id,segment_id,kind,language,text,created FROM media_segments WHERE '+where+' ORDER BY rowid DESC LIMIT ?',(*args,limit))
+   evidence="(SELECT m.rowid AS evidence_cursor,m.*,COALESCE(p.source_kind,'media') AS source_kind,COALESCE(p.speaker_label,'Video speaker') AS speaker_label,COALESCE(p.speaker_basis,'unknown') AS speaker_basis FROM media_segments m LEFT JOIN caption_provenance p ON m.owner=p.owner AND m.session_id=p.session_id AND m.segment_id=p.segment_id AND m.kind=p.kind)"
+   fields='evidence_cursor AS cursor,session_id,segment_id,kind,language,text,created,source_kind,speaker_label,speaker_basis'
+   if source_kind=='all' and not session_id and before is None:
+    # Retrieve both evidence sources even when one has many more recent utterances.
+    rows=[]
+    for category in ('media','conversation'):
+     rows+=self.rows('SELECT '+fields+' FROM '+evidence+' WHERE '+where+' AND source_kind=? ORDER BY evidence_cursor DESC LIMIT ?',(*args,category,max(1,limit//2)))
+    rows.sort(key=lambda r:r['cursor'],reverse=True)
+   else:rows=self.rows('SELECT '+fields+' FROM '+evidence+' WHERE '+where+' ORDER BY evidence_cursor DESC LIMIT ?',(*args,limit))
    limited=len(rows)>=limit or sum(len(r['text']) for r in rows)>budget
    selected=[];remaining=budget
+   categories={r['source_kind'] for r in rows};budgets={k:budget//len(categories) for k in categories} if len(categories)>1 else None
    for row in rows:
-    if remaining<=0:break
-    text=row['text'];row['text']=text[-remaining:];remaining-=len(row['text']);selected.append(row)
-   return {'segments':list(reversed(selected)),'coverage':'Captured captions only, not an entire video. Source and translation are alternate versions of the same segment; session IDs mark separate listening sessions. Newest excerpts are included; use media_recall with next_before to read older content.',
+    available=budgets[row['source_kind']] if budgets else remaining
+    if available<=0:continue
+    text=row['text'];row['text']=text[-available:];remaining-=len(row['text']);selected.append(row)
+    if budgets:budgets[row['source_kind']]-=len(row['text'])
+   return {'segments':list(reversed(selected)),'coverage':'Captured speech only. source_kind distinguishes media from face-to-face conversation. Source and translation are two versions of ONE statement. session_id and segment_id identify that statement; cursor identifies its stored evidence row. speaker_basis=language_inferred is an assumption, not verified identity. Never claim to have watched the entire video.',
     'next_before':min(r['cursor'] for r in selected) if selected else None,
-    'sessions':self.rows('SELECT session_id,MIN(created) AS started,MAX(updated) AS updated,COUNT(*) AS caption_rows FROM media_segments WHERE owner=? GROUP BY session_id ORDER BY MAX(rowid) DESC LIMIT 8',(owner,)),
+    'sessions':self.rows('SELECT session_id,source_kind,MIN(created) AS started,MAX(updated) AS updated,COUNT(*) AS caption_rows FROM '+evidence+' WHERE owner=? '+('AND source_kind=? ' if source_kind!='all' else '')+'GROUP BY session_id,source_kind ORDER BY MAX(evidence_cursor) DESC LIMIT 8',(owner,source_kind) if source_kind!='all' else (owner,)),
     'excerpt_limited':limited}
  def turn(self,owner,turn_id,user_text,reply):
   with self.lock,self.db:self.db.execute('INSERT INTO turns VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET user_text=excluded.user_text,reply=excluded.reply',(turn_id,owner,user_text[:3000],reply[:6000],now()))

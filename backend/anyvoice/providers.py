@@ -1,5 +1,6 @@
 """Only Agora REST calls; Murf Falcon is configured inside Conversational AI Engine."""
 import httpx
+import asyncio
 
 
 class ProviderError(RuntimeError):
@@ -13,6 +14,8 @@ class AgoraServices:
             auth=httpx.BasicAuth(settings.agora_customer_id, settings.agora_customer_secret), timeout=20,
         )
         self.stt_id = self.agent_id = None
+        self.conversation_stt_id=None;self.conversation_pair=None
+        self.conversation_lock=asyncio.Lock();self.closing=False
         self.project = "https://api.agora.io/api/"
 
     async def request(self, method, url, body=None):
@@ -87,9 +90,32 @@ class AgoraServices:
             "text": text, "priority": "APPEND", "interruptable": False,
         })
 
+    async def open_conversation(self,other_language):
+        async with self.conversation_lock:
+            if self.closing:raise ProviderError('Session is stopping')
+            await self._open_conversation(other_language)
+
+    async def _open_conversation(self,other_language):
+        s=self.session;pair=(s.target_language,other_language)
+        if self.conversation_stt_id and self.conversation_pair==pair:return
+        if self.conversation_stt_id:
+            await self.request('POST',self.base('stt')+f'/agents/{self.conversation_stt_id}/leave',{})
+            self.conversation_stt_id=None
+        result=await self.request('POST',self.base('stt')+'/join',{
+            'name':'av_conversation_'+s.id,'languages':list(pair),'maxIdleTime':900,
+            'rtcConfig':{'channelName':s.channel,'pubBotUid':str(s.conversation_stt_uid),'pubBotToken':self.token(s.conversation_stt_uid),'subscribeAudioUids':[str(s.conversation_uid)],'enableJsonProtocol':True},
+            'translateConfig':{'languages':[{'source':pair[0],'target':[pair[1]]},{'source':pair[1],'target':[pair[0]]}]}})
+        self.conversation_stt_id=result.get('agent_id')
+        if not self.conversation_stt_id:raise ProviderError('Agora did not return the conversation translator ID')
+        self.conversation_pair=pair
+
     async def close(self):
+        self.closing=True
+        async with self.conversation_lock:return await self._close()
+
+    async def _close(self):
         errors = []
-        for kind, identity in (("stt", self.stt_id), ("voice", self.agent_id)):
+        for kind, identity in (("stt", self.stt_id), ("stt",self.conversation_stt_id), ("voice", self.agent_id)):
             if identity:
                 try:
                     await self.request("POST", self.base(kind) + f"/agents/{identity}/leave", {})

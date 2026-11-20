@@ -6,6 +6,8 @@ Version 0.17 adds [on-demand screen reading, bounded scrolling, visual compariso
 
 Version 0.19 adds [confirmed background detection, uninterrupted chunk handoffs and retained media/Bubble connections](docs/noninterruptible-routing.md). Version 0.18 added [persistent media-caption recall](docs/media-memory.md).
 
+Version 0.20 adds an explicitly started [bidirectional conversation translator and memory that distinguishes media from conversations](docs/bidirectional-translation.md). A [verified 0.19 rollback](docs/verified-baseline-0.19.md) is saved separately.
+
 Version 0.16 adds [persistent Bubble memory, task tools and native app/YouTube actions](docs/memory-tools.md).
 
 ## App experience

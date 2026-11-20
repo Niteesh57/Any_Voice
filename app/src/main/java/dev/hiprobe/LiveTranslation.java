@@ -28,9 +28,10 @@ final class LiveTranslation {
     private static final class InputFrame {final byte[] bytes;final int track;InputFrame(byte[] bytes,int track){this.bytes=bytes;this.track=track;}}
     private final ArrayBlockingQueue<InputFrame> upload = new ArrayBlockingQueue<>(200);
     private volatile RtcEngineEx engine;
-    private volatile boolean mediaJoined,micJoined;
+    private volatile boolean mediaJoined,micJoined,conversationJoined;
     private final ConcurrentHashMap<Integer,Integer> chunkEnds=new ConcurrentHashMap<>();
     private RtcConnection micConnection;
+    private RtcConnection conversationConnection;
     private volatile boolean joined;
     private volatile String sessionId;
     private volatile boolean outputEnabled = true;
@@ -49,6 +50,7 @@ final class LiveTranslation {
     private volatile int terminalSequence;
     private int customTrack = -1;
     private int micTrack = -1;
+    private int conversationTrack=-1;
     private int workerUid;
     private AudioTrack output;
     private Thread playback, publishing, downloading;
@@ -116,6 +118,7 @@ final class LiveTranslation {
         customTrack = engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE, trackConfig);
         if (customTrack < 0) throw new IllegalStateException("Could not create source audio track");
         if(unified){micTrack=engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE,trackConfig);if(micTrack<0)throw new IllegalStateException("Could not create question audio track");}
+        if(unified){conversationTrack=engine.createCustomAudioTrack(Constants.AudioTrackType.AUDIO_TRACK_MIXABLE,trackConfig);if(conversationTrack<0)throw new IllegalStateException("Could not create conversation audio track");}
         int minimum = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minimum <= 0) throw new IllegalStateException("Audio output format unavailable");
         output = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
@@ -146,9 +149,16 @@ final class LiveTranslation {
                 @Override public void onJoinChannelSuccess(String channel,int uid,int elapsed){if(!closed.get()){micJoined=true;readyIfJoined();}}
                 @Override public void onError(int code){if(!closed.get())fail("Question audio connection error ("+code+")");}
             }),"join question input");
+            conversationConnection=new RtcConnection(data.getString("channel"),data.getInt("conversation_uid"));
+            ChannelMediaOptions conversationOptions=new ChannelMediaOptions();conversationOptions.channelProfile=Constants.CHANNEL_PROFILE_LIVE_BROADCASTING;conversationOptions.clientRoleType=Constants.CLIENT_ROLE_BROADCASTER;
+            conversationOptions.publishMicrophoneTrack=false;conversationOptions.publishCameraTrack=false;conversationOptions.publishCustomAudioTrack=true;conversationOptions.publishCustomAudioTrackId=conversationTrack;conversationOptions.autoSubscribeAudio=false;conversationOptions.autoSubscribeVideo=false;
+            require(engine.joinChannelEx(data.getString("conversation_token"),conversationConnection,conversationOptions,new IRtcEngineEventHandler(){
+                @Override public void onJoinChannelSuccess(String channel,int uid,int elapsed){if(!closed.get()){conversationJoined=true;readyIfJoined();}}
+                @Override public void onError(int code){if(!closed.get())fail("Conversation connection error ("+code+")");}
+            }),"join conversation input");
         }
     }
-    private synchronized void readyIfJoined(){if(!closed.get()&&!joined&&mediaJoined&&(!unified||micJoined)){joined=true;listener.ready();}}
+    private synchronized void readyIfJoined(){if(!closed.get()&&!joined&&mediaJoined&&(!unified||micJoined&&conversationJoined)){joined=true;listener.ready();}}
     private void poll() {
         if (closed.get() || sessionId == null) return;
         try {
@@ -192,6 +202,8 @@ final class LiveTranslation {
         sendTrack(samples,count,customTrack);
     }
     void sendMicrophone(short[] samples,int count){sendTrack(samples,count,unified?micTrack:customTrack);}
+    void sendConversation(short[] samples,int count){sendTrack(samples,count,conversationTrack);}
+    boolean microphoneSafe(){return downloadedSequence<=playedSequence&&prepared.isEmpty()&&SystemClock.elapsedRealtime()-lastPacketAt>400;}
     private void sendTrack(short[] samples,int count,int track){
         if (!joined || closed.get() || terminalMessage != null) return;
         // AudioRecord reads 20 ms at a time; preserve little-endian PCM16.
@@ -315,6 +327,8 @@ final class LiveTranslation {
     }
     void cancelResearch(){String id=sessionId;if(id!=null)new Thread(()->{try{backend.cancelResearch(id);}catch(Exception ignored){}},"CancelResearch").start();}
     void input(boolean media){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.input(sessionId,media);}catch(Exception e){if(!closed.get())fail("Could not switch audio input");}});}
+    void startConversation(JSONObject config){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.startConversation(sessionId,config);}catch(Exception e){ConversationState.clear();ConversationState.message="Could not start translator: "+e.getMessage();}});}
+    void stopConversation(){network.execute(()->{try{if(!closed.get()&&sessionId!=null)backend.stopConversation(sessionId);}catch(Exception e){if(!closed.get())fail("Could not stop conversation translator");}});}
     void close() {
         if (!closed.compareAndSet(false, true)) return;
         stopping = true;
@@ -330,9 +344,11 @@ final class LiveTranslation {
                 join(publishing); join(playback); join(downloading);
                 if (engine != null) {
                     if(micConnection!=null)engine.leaveChannelEx(micConnection);
+                    if(conversationConnection!=null)engine.leaveChannelEx(conversationConnection);
                     engine.leaveChannel();
                     if (customTrack >= 0) engine.destroyCustomAudioTrack(customTrack);
                     if(micTrack>=0)engine.destroyCustomAudioTrack(micTrack);
+                    if(conversationTrack>=0)engine.destroyCustomAudioTrack(conversationTrack);
                     RtcEngine.destroy(); engine = null;
                 }
                 if (output != null) { output.release(); output = null; }

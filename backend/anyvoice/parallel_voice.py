@@ -20,9 +20,12 @@ class Chunk:
     part: int = 0
     done: bool = False
     error: str | None = None
+    voice: dict | None = None
+    conversation: bool = False
 
 class ParallelVoice:
-    def __init__(self, clients, audio, on_error, on_generated, log, window=6, is_current=None):
+    def __init__(self, clients, audio, on_error, on_generated, log, window=6, is_current=None,before_generate=None):
+        self.before_generate=before_generate
         self.is_current = is_current or (lambda epoch: True)
         self.clients, self.audio = clients, audio
         self.on_error, self.on_generated, self.log = on_error, on_generated, log
@@ -60,7 +63,7 @@ class ParallelVoice:
                     break
                 number = self.next_number
                 self.next_number += 1
-                chunk = Chunk(number, text_part, queued, self.directory / ('%08d.pcm' % number),epoch=epoch)
+                chunk = Chunk(number, text_part, queued, self.directory / ('%08d.pcm' % number),epoch=epoch,voice=item[3] if len(item)>3 else None,conversation=bool(item[4]) if len(item)>4 else False)
                 chunk.path.touch()
                 self.chunks[number] = chunk
                 self.log.info('chunk_assigned chunk=%03d bytes=%d',number,len(text_part.encode('utf-8')))
@@ -89,7 +92,11 @@ class ParallelVoice:
                     first_audio = True
                     self.log.info('chunk_first_audio slot=%d chunk=%03d ms=%.0f',slot+1,chunk.number,(time.monotonic()-started)*1000)
             try:
-                await client.synthesize(chunk.text, pcm, first)
+                if self.before_generate:
+                    await self.before_generate(chunk)
+                    if chunk.conversation:self.log.info('conversation_turn_wait chunk=%03d ms=%.0f',chunk.number,(time.monotonic()-started)*1000)
+                    started=time.monotonic()
+                await client.synthesize(chunk.text, pcm, first,**(chunk.voice or {}))
                 if not self.is_current(chunk.epoch):
                     chunk.done = True
                     self.release_ready()
@@ -102,7 +109,8 @@ class ParallelVoice:
                 self.release_ready()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self.log.error('chunk_failed chunk=%03d type=%s detail=%s',chunk.number,type(exc).__name__,str(exc) if isinstance(exc,ProviderError) else 'Voice generation failed')
                 # A later failure must not interrupt an earlier voice still being generated.
                 chunk.error = 'Could not generate voice chunk %03d. Earlier audio will finish.' % chunk.number
                 chunk.done = True

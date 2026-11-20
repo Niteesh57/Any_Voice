@@ -6,6 +6,7 @@ import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 /** Opt-in on-device checks. Uses a separate test identity, never the user's memory. */
 public final class DeviceSmokeInstrumentation extends Instrumentation {
@@ -15,7 +16,7 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
         Bundle results=new Bundle();
         try{
             Context real=getTargetContext();
-            if("unified".equals(requestedMode)){checkUnified(real,results);finish(-1,results);return;}
+            if("unified".equals(requestedMode)||"conversation".equals(requestedMode)){checkUnified(real,results);finish(-1,results);return;}
             if("apps".equals(requestedMode)){
                 DeviceTools tools=new DeviceTools(real);JSONObject apps=tools.apps();
                 if(!apps.has("com.google.android.youtube"))throw new AssertionError("YouTube missing from native capabilities");
@@ -85,14 +86,20 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
         if(!check.ready())throw new AssertionError("Timed out waiting for unified transition");
     }
     private static void stream(LiveTranslation live,byte[] pcm,boolean mic)throws Exception{
+        streamInput(live,pcm,mic?1:0);
+    }
+    private static void streamInput(LiveTranslation live,byte[] pcm,int input)throws Exception{
         long started=android.os.SystemClock.elapsedRealtime();
         for(int offset=0;offset<pcm.length+32000;offset+=640){short[] frame=new short[320];for(int n=0;n<320&&offset+n*2+1<pcm.length;n++)frame[n]=(short)((pcm[offset+n*2]&255)|(pcm[offset+n*2+1]<<8));
-            if(mic)live.sendMicrophone(frame,frame.length);else live.send(frame,frame.length);
+            if(input==2)live.sendConversation(frame,frame.length);else if(input==1)live.sendMicrophone(frame,frame.length);else live.send(frame,frame.length);
             long wait=started+(offset+640)/32-android.os.SystemClock.elapsedRealtime();if(wait>0)Thread.sleep(wait);
         }
     }
     private void checkUnified(Context real,Bundle results)throws Exception{
-        String suffix=java.util.UUID.randomUUID().toString();Context isolated=new ContextWrapper(real){@Override public SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(name.equals("bubble_identity")?"unified_check_"+suffix:name,mode);}};
+        String suffix=java.util.UUID.randomUUID().toString();
+        SharedPreferences saved=real.getSharedPreferences("connection",Context.MODE_PRIVATE);
+        real.getSharedPreferences("unified_connection_"+suffix,Context.MODE_PRIVATE).edit().putString("url","http://127.0.0.1:8000").putString("access",saved.getString("access","")).putString("voice_provider",saved.getString("voice_provider","murf-direct")).commit();
+        Context isolated=new ContextWrapper(real){@Override public SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(name.equals("bubble_identity")?"unified_check_"+suffix:name.equals("connection")?"unified_connection_"+suffix:name,mode);}};
         java.util.concurrent.atomic.AtomicReference<String> error=new java.util.concurrent.atomic.AtomicReference<>();
         java.util.concurrent.atomic.AtomicReference<JSONObject> status=new java.util.concurrent.atomic.AtomicReference<>(new JSONObject());
         java.util.concurrent.atomic.AtomicBoolean ready=new java.util.concurrent.atomic.AtomicBoolean();
@@ -100,7 +107,29 @@ public final class DeviceSmokeInstrumentation extends Instrumentation {
         try{
             live.start();until(ready::get,error,85000);String session=live.diagnosticSession();
             byte[] cooking=java.nio.file.Files.readAllBytes(new java.io.File(real.getFilesDir(),"check-cooking.pcm").toPath());
-            stream(live,cooking,false);live.input(false);
+            stream(live,cooking,false);
+            if("conversation".equals(requestedMode)){
+                JSONObject library=new BackendClient(isolated).voices();JSONArray catalog=library.getJSONArray("voices");String partnerVoice="";
+                for(int i=0;i<catalog.length()&&partnerVoice.isEmpty();i++){JSONObject row=catalog.getJSONObject(i);JSONArray locales=row.getJSONArray("locales");for(int n=0;n<locales.length();n++)if("en-IN".equals(locales.getString(n)))partnerVoice=row.getString("id");}
+                if(partnerVoice.isEmpty())throw new AssertionError("No compatible English voice available");
+                live.startConversation(new JSONObject().put("other_language","en-IN").put("other_voice",partnerVoice).put("my_name","Tester").put("partner_name","Demo"));
+                until(()->"bidir".equals(status.get().optString("input_mode"))&&status.get().optBoolean("conversation_listening"),error,90000);
+                streamInput(live,cooking,2);
+                until(()->"te-IN".equals(status.get().optString("conversation_direction")),error,45000);
+                until(()->status.get().optBoolean("conversation_listening")&&live.outputIdle(),error,90000);
+                results.putString("partner_to_me",status.get().optString("translated_text"));
+                byte[] telugu=java.nio.file.Files.readAllBytes(new java.io.File(real.getFilesDir(),"check-telugu.pcm").toPath());
+                streamInput(live,telugu,2);
+                until(()->"en-IN".equals(status.get().optString("conversation_direction")),error,45000);
+                until(()->status.get().optBoolean("conversation_listening")&&live.outputIdle(),error,90000);
+                results.putString("me_to_partner",status.get().optString("translated_text"));
+                JSONObject history=new BackendClient(isolated).overview();
+                if(history.getJSONObject("recent_media").getJSONArray("segments").length()==0||history.getJSONObject("recent_translation_conversations").getJSONArray("segments").length()==0)throw new AssertionError("Missing source-specific memory");
+                live.stopConversation();until(()->"media".equals(status.get().optString("input_mode")),error,15000);
+                if(!session.equals(live.diagnosticSession()))throw new AssertionError("Conversation reconnected session");
+                results.putString("bidirectional_memory","PASS: two directions, two source types, same session");
+            }
+            live.input(false);
             until(()->"bubble".equals(status.get().optString("input_mode")),error,90000);
             if(!session.equals(live.diagnosticSession()))throw new AssertionError("Session reconnected");
             Thread.sleep(700);

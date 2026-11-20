@@ -162,3 +162,13 @@ Debug follow-up: UI hierarchy inspection itself temporarily suppressed accessibi
 - Subsequent small fixes preserve completed-chunk markers when playback ACK precedes synthesis finalization, hold an explicit Ask request through long drains, and keep original media muted during fresh detection. Backend tests cover the ACK race; Android build/lint verifies final client edits.
 - Rollback: `anyvoice-before-noninterruptible-routing`, `dist/AnyVoice-rollback-before-noninterruptible.apk`, `anyvoice-backend:rollback-before-noninterruptible`.
 
+# 0.20 bidirectional translation and source-aware memory — 2026-11-20
+
+- Saved 0.19 APK/image/source tag as the verified baseline before implementing this feature.
+- Added explicit dedicated interpreter UI, partner language/voice selection from the live catalog, manual Start/Stop, exclusive input routing and reuse of the existing media/Bubble session. Screen-off ends microphone capture and requires a new manual Start.
+- Persistent evidence distinguishes media and face-to-face conversations, with fresh capture IDs, language, speaker label/uncertainty, original/translation text and local capture time. Recent context is bounded separately by source; both agreement and contradiction were tested with real Qwen requests.
+- 75 backend tests passed. Android debug build, test build and lint passed. OnePlus synthetic audio round trip passed both directions, source memory and actual playback ACK, retaining session `93e990ac`.
+- Reproduced and fixed Murf context-capacity rejection on rapid requests. Capacity retry is bounded and allowed only before PCM output; partial audio never replays. A Wi-Fi timeout was isolated from functionality by using USB transport for the final native test.
+- Inspected the dedicated screen and both live pickers. Started the real microphone through the normal app flow, then verified screen-off removes the service and wake does not restart it. A noisy two-person acoustic test is still needed.
+- Exact artifacts, checksums, test scope and unverified conditions: [docs/verification-0.20.md](docs/verification-0.20.md).
+

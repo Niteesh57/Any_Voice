@@ -19,6 +19,8 @@ class Session:
     channel: str = field(default_factory=lambda: "av_" + uuid.uuid4().hex)
     source_uid: int = 1001
     microphone_uid: int = 1002
+    conversation_uid: int = 1003
+    conversation_stt_uid: int = 5001
     worker_uid: int = 2001  # Conversational AI voice agent; Android subscribes to this UID.
     control_uid: int = 3001
     stt_uid: int = 4001
@@ -59,6 +61,10 @@ class Session:
     max_input_rms: int = 0
     input_mode: str = "media"
     desired_input: str = "media"
+    conversation_listening: bool = False
+    conversation_speaker: str = ""
+    conversation_direction: str = ""
+    conversation_id: str = ""
 
     def public(self):
         return {"id": self.id, "state": self.state, "message": self.message,
@@ -66,6 +72,8 @@ class Session:
                 "waiting_for_user": bool(self.owner and self.memory_store and (self.memory_store.question(self.owner) or {}).get("state")=="pending"),
                 "mode": self.mode, "bubble_state": self.bubble_state, "wake_sequence": self.wake_sequence,
                 "input_mode": self.input_mode, "desired_input": self.desired_input,
+                "conversation_listening":self.conversation_listening,"conversation_id":self.conversation_id,
+                "conversation_speaker":self.conversation_speaker,"conversation_direction":self.conversation_direction,
                 "input_allowed": (self.mode == "bubble" or self.mode == "unified" and self.input_mode == "bubble") and self.bubble_state in ("standby", "listening"),
                 "source_text": self.source, "translated_text": self.translated,
                 "phrases": self.phrases, "audio_frames": self.audio_frames,
