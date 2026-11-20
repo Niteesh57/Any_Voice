@@ -9,17 +9,30 @@ import java.nio.charset.StandardCharsets;
 
 /** Only the backend URL and app access token live on the phone, never provider keys. */
 final class BackendClient {
+    private final String deviceId,deviceKey;
     private final String base;
     private final String access;
     private final String voiceProvider;
     private final UserProfile profile;
+    private final Context context;
 
     BackendClient(Context context) {
+        this.context=context.getApplicationContext();
         profile = new UserProfile(context);
+        String[] identity=identity(context);deviceId=identity[0];deviceKey=identity[1];
         SharedPreferences prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE);
         base = prefs.getString("url", BuildConfig.DEFAULT_BACKEND_URL).trim().replaceAll("/+$", "");
         access = prefs.getString("access", "").trim();
         voiceProvider = prefs.getString("voice_provider", "murf-direct");
+    }
+    private static synchronized String[] identity(Context context){
+        SharedPreferences prefs=context.getSharedPreferences("bubble_identity",Context.MODE_PRIVATE);
+        String id=prefs.getString("id",""),key=prefs.getString("key","");
+        if(id.isEmpty()||key.isEmpty()){
+            id=java.util.UUID.randomUUID().toString().replace("-","");key=java.util.UUID.randomUUID().toString().replace("-","")+java.util.UUID.randomUUID().toString().replace("-","");
+            if(!prefs.edit().putString("id",id).putString("key",key).commit())throw new IllegalStateException("Could not save device identity");
+        }
+        return new String[]{id,key};
     }
     static void save(Context context, String url, String access, String voiceProvider) throws Exception {
         validate(url);
@@ -47,11 +60,14 @@ final class BackendClient {
         return request("POST", "/v1/sessions", new JSONObject().put("source_language", "auto").put("target_language", profile.language()).put("voice_id", profile.voice()).put("voice_provider", voiceProvider));
     }
     JSONObject startBubble() throws Exception {
-        String context=ListeningState.sourceText+"\n"+ListeningState.translatedText+"\nPrevious Bubble reply: "+BubbleState.reply;
+        String context=ListeningState.sourceText+"\n"+ListeningState.translatedText;
         if(context.length()>8000)context=context.substring(context.length()-8000);
         return request("POST", "/v1/sessions",new JSONObject().put("mode","bubble").put("source_language","auto")
-            .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context));
+            .put("target_language",profile.language()).put("voice_id",profile.voice()).put("voice_provider","agora-engine").put("context",context).put("timezone",java.util.TimeZone.getDefault().getID()).put("device_apps",new DeviceTools(this.context).apps()));
     }
+    JSONObject overview() throws Exception{return request("GET","/v1/me/overview",null);}
+    JSONObject tool(String name,JSONObject args) throws Exception{return request("POST","/v1/me/tools",new JSONObject().put("request_id",java.util.UUID.randomUUID().toString()).put("name",name).put("arguments",args));}
+    void deviceResult(String id,JSONObject result) throws Exception{request("POST","/v1/me/actions/"+id+"/result",result);}
     JSONObject voices() throws Exception { return request("GET", "/v1/voices", null); }
     byte[] preview(String voice, String language) throws Exception {
         validate(base);
@@ -78,6 +94,7 @@ final class BackendClient {
         HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/pcm-stream-v3?after=" + after).openConnection();
         c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(10000);
         c.setRequestProperty("Authorization", "Bearer " + access);
+        c.setRequestProperty("X-AnyVoice-Device",deviceId);c.setRequestProperty("X-AnyVoice-Device-Key",deviceKey);
         if (c.getResponseCode() != 200) { c.disconnect(); throw new IOException("Audio stream unavailable"); }
         return c;
     }
@@ -89,6 +106,7 @@ final class BackendClient {
         HttpURLConnection c = (HttpURLConnection)new URL(base + "/v1/sessions/" + id + "/audio/" + sequence).openConnection();
         c.setInstanceFollowRedirects(false); c.setConnectTimeout(10000); c.setReadTimeout(15000);
         c.setRequestProperty("Authorization", "Bearer " + access);
+        c.setRequestProperty("X-AnyVoice-Device",deviceId);c.setRequestProperty("X-AnyVoice-Device-Key",deviceKey);
         try {
             if (c.getResponseCode() != 200) throw new IOException("Audio download failed (" + c.getResponseCode() + ")");
             if (expectedBytes < 2 || expectedBytes > 16000 * 2 * 90 || expectedBytes % 2 != 0)
@@ -113,6 +131,7 @@ final class BackendClient {
         connection.setReadTimeout(path.equals("/v1/sessions") ? 80000 : path.endsWith("/stop") ? 45000 : 10000);
         connection.setRequestMethod(method);
         connection.setRequestProperty("Authorization", "Bearer " + access);
+        connection.setRequestProperty("X-AnyVoice-Device",deviceId);connection.setRequestProperty("X-AnyVoice-Device-Key",deviceKey);
         connection.setRequestProperty("Accept", "application/json");
         try {
             if (body != null) {

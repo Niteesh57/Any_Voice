@@ -15,3 +15,5 @@ dist/
 **/__pycache__/
 *.pyc
 agora_rtc_log/
+
+backend/data/

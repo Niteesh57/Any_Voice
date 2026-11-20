@@ -128,6 +128,7 @@ public final class MainActivity extends Activity {
         label(fi,"Always within reach",15,INK,600);label(fi,Settings.canDrawOverlays(this)?"Drag the bubble. Tap for controls.":"Enable your floating shortcut",12,MUTED,400);
         label(fr,"↗",23,GREEN,400);floating.setOnClickListener(v->{if(!Settings.canDrawOverlays(this))startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));else toast("Your single floating bubble appears when Any Voice is enabled.");});
         space(root,14);
+        action(root,"Tasks & memory  →",0xffedf2e3,GREEN,v->openMemory());space(root,12);
         label(root,"One bubble. Two ways to listen.",20,INK,700);
         label(root,"App audio takes priority for translation. After a quiet period, Bubble listens for your questions. Tap Ask Bubble in the floating controls to ask over a video.",13,MUTED,400);
         label(root,"While enabled, the microphone is used in conversation mode only when unlocked. Locking pauses the microphone. Disable stops both modes.",11,MUTED,400);
@@ -138,6 +139,30 @@ public final class MainActivity extends Activity {
         label(transcript,profile.languageName().toUpperCase(Locale.ROOT),10,GREEN,700);translated=label(transcript,"Your translation appears here.",16,INK,500);
         transcriptToggle.setOnClickListener(v->{boolean hidden=transcript.getVisibility()==View.GONE;transcript.setVisibility(hidden?View.VISIBLE:View.GONE);transcriptToggle.setText(hidden?"Live transcript   ⌃":"Live transcript   ⌄");if(hidden)enter(transcript);});
         label(root,"Already in your language? Hear the original voice.\nMedia translation uses app audio. Bubble uses your microphone only when enabled.",12,MUTED,400);space(root,24);hackathon(root);enter(root);
+    }
+    private void openMemory(){
+        network.execute(()->{try{JSONObject data=new BackendClient(this).overview();handler.post(()->{if(isFinishing())return;
+            LinearLayout content=column();content.setPadding(dp(22),dp(12),dp(22),dp(18));
+            label(content,"Your tasks & memory",23,INK,700);label(content,"Saved for this phone across voice sessions and backend restarts.",12,MUTED,400);
+            JSONArray tasks=data.optJSONArray("tasks");label(content,"Tasks",17,INK,700);
+            if(tasks==null||tasks.length()==0)label(content,"Ask Bubble: remember I need to finish my presentation tomorrow.",13,MUTED,400);
+            if(tasks!=null)for(int i=0;i<tasks.length();i++){
+                JSONObject task=tasks.optJSONObject(i);if(task==null)continue;
+                boolean done=task.optString("status").equals("done");
+                CheckBox item=new CheckBox(this);String due=task.optString("due_date","");if(due.equals("null"))due="";
+                item.setText(task.optString("title")+(due.isEmpty()?"":" · "+due));item.setTextColor(INK);item.setChecked(done);content.addView(item);
+                item.setOnCheckedChangeListener((button,checked)->{item.setEnabled(false);network.execute(()->{try{new BackendClient(this).tool(checked?"task_complete":"task_reopen",new JSONObject().put("task_id",task.optString("id")));handler.post(()->item.setEnabled(true));}catch(Exception e){handler.post(()->{item.setOnCheckedChangeListener(null);item.setChecked(!checked);toast("Update failed. Reopen Tasks & memory to retry.");});}});});
+            }
+            label(content,"Remembered facts",17,INK,700);JSONArray facts=data.optJSONArray("memories");
+            if(facts==null||facts.length()==0)label(content,"Say: remember that I prefer short explanations.",13,MUTED,400);
+            if(facts!=null)for(int i=0;i<facts.length();i++){
+                JSONObject fact=facts.optJSONObject(i);if(fact==null)continue;
+                label(content,fact.optString("key"),13,GREEN,600);TextView value=label(content,fact.optString("value"),14,INK,400);
+                TextView forget=action(content,"Forget",0xffedf2e3,GREEN,v->{});
+                forget.setOnClickListener(v->{forget.setEnabled(false);network.execute(()->{try{new BackendClient(this).tool("memory_forget",new JSONObject().put("memory_id",fact.optString("id")));handler.post(()->{value.setText("Removed");forget.setText("Forgotten");toast("Memory removed; previous conversational copies cleared");});}catch(Exception e){handler.post(()->{forget.setEnabled(true);toast(e.getMessage());});}});});
+            }
+            ScrollView scroll=new ScrollView(this);scroll.addView(content);new AlertDialog.Builder(this).setView(scroll).setPositiveButton("Close",null).show();
+        });}catch(Exception e){handler.post(()->toast(e.getMessage()));}});
     }
     private void hackathon(LinearLayout parent){
         View line=new View(this);line.setBackgroundColor(LINE);parent.addView(line,new LinearLayout.LayoutParams(-1,dp(1)));space(parent,16);

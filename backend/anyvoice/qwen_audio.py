@@ -12,10 +12,16 @@ class QwenAudio:
  def __init__(self,settings,language,context="",client=None):
   self.settings=settings;self.language=language;self.context=context[:8000];self.history=[]
   self.client=client or httpx.AsyncClient(timeout=httpx.Timeout(45,connect=10))
+ def use_memory(self,store,owner,zone,apps):
+  from .agent import MemoryAgent
+  self.agent=MemoryAgent(self,store,owner,zone,apps)
  def configured(self):
   value=urlparse(self.settings.bubble_llm_url)
   return bool(self.settings.dashscope_key and self.settings.bubble_llm_model and value.scheme=="https" and value.netloc and not value.username and not value.password)
  async def answer(self,pcm):
+  if hasattr(self,"agent"):
+   async for text in self.agent.answer(pcm):yield text
+   return
   if not self.configured():raise ProviderError("Configure Bubble's DashScope key, model and HTTPS endpoint.")
   if not 3200<=len(pcm)<=16000*2*15 or len(pcm)%2:raise ProviderError("Command audio is too short or too long.")
   output=io.BytesIO()

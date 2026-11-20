@@ -2,6 +2,8 @@
 
 Hear app audio in the language you choose. A native Android hackathon app built for **Build with Agora — Bengaluru 2026**, organized by Agora and powered by KNOTiC.
 
+Version 0.16 adds [persistent Bubble memory, task tools and native app/YouTube actions](docs/memory-tools.md).
+
 ## App experience
 
 - Local profile: name and optional gender.
@@ -23,7 +25,7 @@ Configure `backend/.env` from [backend/.env.example](backend/.env.example), then
 
 ```powershell
 docker build -t anyvoice-backend:dev backend
-docker run -d --name anyvoice-backend --restart unless-stopped --env-file backend/.env -p 8000:8000 anyvoice-backend:dev
+docker run -d --name anyvoice-backend --restart unless-stopped --env-file backend/.env -e BUBBLE_MEMORY_PATH=/data/bubble.sqlite3 -v anyvoice-memory:/data -p 8000:8000 anyvoice-backend:dev
 .\gradlew.bat :app:assembleDebug :app:lintDebug -PtargetAbi=arm64-v8a -PanyVoiceBackendUrl=http://192.168.1.9:8000 --console=plain
 ```
 

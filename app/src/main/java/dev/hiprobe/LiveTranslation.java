@@ -141,7 +141,15 @@ final class LiveTranslation {
                 terminalSequence = status.optInt("last_audio_sequence", downloadedSequence);
                 terminalMessage = status.optString("message", "Session ended");
             }
-            if(bubble)listener.status(status);
+            if(bubble){
+                JSONArray actions=status.optJSONArray("device_actions");
+                if(actions!=null)for(int i=0;i<actions.length();i++){
+                    JSONObject action=actions.getJSONObject(i);
+                    JSONObject result=new DeviceTools(context).run(action);
+                    try{backend.deviceResult(action.getString("id"),result);}catch(Exception ignored){} // Stored receipt is retried, never re-executed.
+                }
+                listener.status(status);
+            }
             else {
                 ListeningState.sourceText=status.optString("source_text");
                 ListeningState.translatedText=status.optString("translated_text");

@@ -108,3 +108,8 @@ adb -s DEVICE_SERIAL shell dumpsys audio
 - `:app:assembleDebug` and `:app:lintDebug` passed. No provider credentials were added to Android. Provider configuration remains in ignored backend/.env.
 - Device installation and live mode-transition checks are pending: ADB lost the connected OnePlus during the first install attempt. Windows sees its file-transfer device, but ADB lists no device. Do not interpret the build/policy results as a completed on-phone audio test.
 - Known limits: source choice uses sustained captured audio levels, not semantic voice classification. Music can keep media mode selected. Switching reconnects Agora/provider sessions and adds connection time. Media input is buffered in memory (bounded to 20 seconds) while connecting, and mode changes wait for played output plus a quiet grace period. See docs/unified-bubble.md.
+
+
+## Memory and native tools 0.16 — 2026-11-20
+
+52 backend tests and Android assemble/lint passed. Live Qwen audio/function-calling tests saved a preference, created/completed a task across database/client reopen, and generated app/YouTube actions with simulated device acknowledgements. Native Agora RTC -> Qwen memory write -> selected-language Murf -> queued PCM/playback ACK passed (12.6 s request start to completed Telugu speech in one fixture). Docker container recreation retained an isolated test task. Real phone UI/app-search integration is unverified: ADB shows no device. Detailed latency boundaries and rollback are in docs/memory-tools.md.

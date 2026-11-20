@@ -20,11 +20,13 @@ class Settings:
     dashscope_key: str = ""
     bubble_llm_url: str = ""
     bubble_llm_model: str = ""
+    memory_path: str = ":memory:"
     max_seconds: int = 900
 
     @classmethod
     def from_env(cls):
         return cls(
+            memory_path=os.getenv("BUBBLE_MEMORY_PATH", "data/bubble.sqlite3"),
             auto_languages=tuple(x.strip() for x in os.getenv("AUTO_SOURCE_LANGUAGES", "en-IN,hi-IN,ta-IN,te-IN").split(",") if x.strip()),
             dashscope_key=os.getenv("DASHSCOPE_API_KEY", ""),
             bubble_llm_url=os.getenv("BUBBLE_LLM_URL", ""),

@@ -16,12 +16,17 @@ from .rtc import native_available
 from .session import Pipeline, Session, token_for
 from .bubble import BubblePipeline
 from .qwen_audio import QwenAudio
+from .memory import MemoryStore
+from .tools import validate as validate_tool
+from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
 
 load_dotenv()
 
 
 class StartRequest(BaseModel):
     mode: Literal["translation", "bubble"] = "translation"
+    timezone: str = Field(default="Asia/Kolkata",max_length=80)
+    device_apps: dict[str,str] = Field(default_factory=dict,max_length=100)
     context: str = Field(default="", max_length=8000)
     source_language: str = "auto"
     target_language: str = "te-IN"
@@ -29,15 +34,35 @@ class StartRequest(BaseModel):
     voice_provider: Literal["murf-direct", "agora-engine"] | None = None
 
 
+class DeviceResult(BaseModel):
+    status: Literal["launch_requested","browser_requested","unavailable","failed","needs_unlock","execution_unknown"]
+    detail: str = Field(default="",max_length=300)
+
+class ManualTool(BaseModel):
+    request_id: str = Field(min_length=8,max_length=100)
+    name: Literal["task_create","task_update","task_complete","task_reopen","task_list","memory_save","memory_search","memory_forget"]
+    arguments: dict
+
 def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_available, bubble_factory=BubblePipeline):
     settings = settings or Settings.from_env()
     sessions = {}
+    memory = MemoryStore(settings.memory_path)
     catalog = VoiceCatalog(settings)
     creating = asyncio.Lock()
 
     async def auth(authorization: str = Header(default="")):
         if not settings.access_token or not hmac.compare_digest(authorization, "Bearer " + settings.access_token):
             raise HTTPException(401, "Invalid backend access token")
+
+    async def device(x_anyvoice_device: str = Header(default=""),x_anyvoice_device_key: str = Header(default="")):
+        if not x_anyvoice_device and not x_anyvoice_device_key:return ""
+        try:return memory.identity(x_anyvoice_device,x_anyvoice_device_key)
+        except ValueError as exc:raise HTTPException(401,str(exc)) from exc
+
+    def scoped(sid,owner):
+        session=sessions.get(sid)
+        if not session or session.owner!=owner:raise HTTPException(404,"Session not found")
+        return session
 
     @asynccontextmanager
     async def lifespan(app):
@@ -50,11 +75,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.14", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.16", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.14"}
+        return {"service": "Any Voice", "version": "0.16"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -70,6 +95,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         missing = settings.missing()
         native = native_check()
         return {"configured": not missing and native, "missing": missing,
+                "memory_tools": True,
                 "bubble_configured": bool(settings.dashscope_key and settings.bubble_llm_url and settings.bubble_llm_model),
                 "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_selection": "voice-library",
                 "message": "Ready" if not missing and native else "Configure provider credentials and run the Linux worker"}
@@ -94,8 +120,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             return Response(audio,media_type="audio/wav",headers={"Cache-Control":"private, max-age=600"})
 
     @app.get("/v1/bubble/diagnostics", dependencies=[Depends(auth)])
-    async def bubble_diagnostics():
-        session=next((s for s in sessions.values() if s.mode=="bubble" and s.task and not s.task.done()),None)
+    async def bubble_diagnostics(owner: str = Depends(device)):
+        session=next((s for s in sessions.values() if s.owner==owner and s.mode=="bubble" and s.task and not s.task.done()),None)
         if not session:return {"active":False}
         return {"active":True,"state":session.state,"phase":session.bubble_state,"wake_sequence":session.wake_sequence,
             "input_frames":session.input_frames,"input_rms":session.input_rms,"max_input_rms":session.max_input_rms,
@@ -103,7 +129,10 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             "acknowledged":session.audio.acknowledged if session.audio else 0,"phrases":session.phrases}
 
     @app.post("/v1/sessions", dependencies=[Depends(auth)])
-    async def start(request: StartRequest):
+    async def start(request: StartRequest, owner: str = Depends(device)):
+        try:ZoneInfo(request.timezone)
+        except (ZoneInfoNotFoundError,ValueError):raise HTTPException(422,"Choose a valid timezone")
+        if any(len(k)>200 or len(v)>100 for k,v in request.device_apps.items()):raise HTTPException(422,"Invalid app capabilities")
         if request.mode == "bubble" and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
             raise HTTPException(503,"Configure Bubble Qwen credentials on the backend")
         if request.source_language not in ("auto", "en-IN") or not agora_locale(request.target_language):
@@ -127,12 +156,12 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                     del sessions[sid]
             if any(s.task and not s.task.done() for s in sessions.values()):
                 raise HTTPException(409, "A session is already active. Stop it before starting another.")
-            session = Session(mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
+            session = Session(owner=owner,timezone=request.timezone,device_apps=request.device_apps,memory_store=memory,mode=request.mode, context=request.context, voice_provider=request.voice_provider or settings.voice_provider,
                 target_language=agora_locale(request.target_language), voice_locale=request.target_language, voice_id=request.voice_id,
                 source_language=request.source_language,
                 source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else ("en-IN",))
             if request.mode == "bubble":
-                session.source_languages=("en-IN",)  # English wake phrase; Qwen understands command audio directly.
+                session.source_languages=("en-IN",)  # Command audio goes directly to Qwen, without an STT bot.
             sessions[session.id] = session
             try:
                 pipeline = (bubble_factory if request.mode == "bubble" else pipeline_factory)(settings, session)
@@ -154,16 +183,16 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 raise
 
     @app.get("/v1/sessions/{sid}", dependencies=[Depends(auth)])
-    async def status(sid: str):
-        session = sessions.get(sid)
+    async def status(sid: str,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session:
             raise HTTPException(404, "Session not found")
         session.touched = time.monotonic()
-        return session.public()
+        return {**session.public(),"device_actions":memory.actions(owner) if owner else []}
 
     @app.post("/v1/sessions/{sid}/stop", dependencies=[Depends(auth)])
-    async def stop(sid: str):
-        session = sessions.get(sid)
+    async def stop(sid: str,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session:
             raise HTTPException(404, "Session not found")
         session.stopped.set()
@@ -175,47 +204,47 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         return session.public()
 
     @app.get("/v1/sessions/{sid}/audio", dependencies=[Depends(auth)])
-    async def audio_manifest(sid: str, after: int = 0):
-        session = sessions.get(sid)
+    async def audio_manifest(sid: str, after: int = 0,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         return session.audio.manifest(max(0, after))
 
     @app.get("/v1/sessions/{sid}/pcm-stream", dependencies=[Depends(auth)])
-    async def pcm_stream(sid: str, after: int = 0):
-        session = sessions.get(sid)
+    async def pcm_stream(sid: str, after: int = 0,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set()),
             media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
 
     @app.get("/v1/sessions/{sid}/pcm-stream-v2", dependencies=[Depends(auth)])
-    async def numbered_pcm_stream(sid: str, after: int = 0):
-        session = sessions.get(sid)
+    async def numbered_pcm_stream(sid: str, after: int = 0,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set(), numbered=True),
             media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
 
     @app.get("/v1/sessions/{sid}/pcm-stream-v3", dependencies=[Depends(auth)])
-    async def routed_pcm_stream(sid: str, after: int = 0):
-        session = sessions.get(sid)
+    async def routed_pcm_stream(sid: str, after: int = 0,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         return StreamingResponse(session.audio.packets(max(0, after), lambda: session.stopped.is_set(), routed=True),
             media_type="application/octet-stream", headers={"Cache-Control":"no-store", "X-Accel-Buffering":"no"})
 
     @app.get("/v1/sessions/{sid}/audio/{sequence}", dependencies=[Depends(auth)])
-    async def audio_clip(sid: str, sequence: int):
-        session = sessions.get(sid)
+    async def audio_clip(sid: str, sequence: int,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         row = session.audio.clips.get(sequence) if session and session.audio else None
         if not row:
             raise HTTPException(404, "Audio clip not available")
         return FileResponse(row['path'], media_type="application/octet-stream")
 
     @app.post("/v1/sessions/{sid}/audio/{sequence}/played", dependencies=[Depends(auth)])
-    async def played(sid: str, sequence: int):
-        session = sessions.get(sid)
+    async def played(sid: str, sequence: int,owner: str = Depends(device)):
+        session = scoped(sid,owner)
         if not session or not session.audio:
             raise HTTPException(404, "Audio session not found")
         try:
@@ -224,6 +253,24 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
             raise HTTPException(409, str(exc)) from exc
         return {"acknowledged": session.audio.acknowledged}
 
+    @app.get("/v1/me/overview",dependencies=[Depends(auth)])
+    async def overview(owner: str = Depends(device)):
+        if not owner:raise HTTPException(401,"Device identity required")
+        return memory.context(owner)
+
+    @app.post("/v1/me/tools",dependencies=[Depends(auth)])
+    async def manual_tool(request: ManualTool,owner: str = Depends(device)):
+        if not owner:raise HTTPException(401,"Device identity required")
+        try:return memory.execute(owner,request.request_id,request.name,validate_tool(request.name,request.arguments))
+        except ValueError as exc:raise HTTPException(422,str(exc)[:300]) from exc
+
+    @app.post("/v1/me/actions/{action_id}/result",dependencies=[Depends(auth)])
+    async def device_result(action_id: str,result: DeviceResult,owner: str = Depends(device)):
+        if not owner:raise HTTPException(401,"Device identity required")
+        try:return memory.action_result(owner,action_id,result.model_dump()) or {"status":"pending"}
+        except ValueError as exc:raise HTTPException(404,str(exc)) from exc
+
+    app.state.memory=memory
     app.state.sessions = sessions
     return app
 

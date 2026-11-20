@@ -37,3 +37,8 @@ docker run -d --name anyvoice-backend --restart unless-stopped --env-file backen
 Use a single Uvicorn worker because session ownership is in memory. Enable RTC and STT/Translation on Agora; the optional Engine route also requires Conversational AI and Signaling. Its authenticated inert LLM callback generates no text and calls no external model.
 
 Tests run from this directory: `.\.venv\Scripts\python.exe -m unittest discover -s tests -q`. See root `VALIDATION.md` for observations and limitations. Working 0.11 rollback: `anyvoice-backend:rollback-v0.11` with the matching Git tag and APK.
+
+
+## Persistent Bubble tools (0.16)
+
+Mount `anyvoice-memory:/data` and set `BUBBLE_MEMORY_PATH=/data/bubble.sqlite3` whenever recreating the Docker container. This retains SQLite tasks, explicit memories and normalized conversation across sessions. Phone identity/key headers scope the records; keys are separate from provider credentials. See [memory and tools](../docs/memory-tools.md) for commands, limits and rollback.

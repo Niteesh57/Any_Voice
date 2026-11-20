@@ -45,6 +45,10 @@ class Session:
     mode: str = "translation"
     bubble_state: str = "standby"
     wake_sequence: int = 0
+    owner: str = ""
+    timezone: str = "Asia/Kolkata"
+    device_apps: dict = field(default_factory=dict)
+    memory_store: object = None
     context: str = ""
     input_frames: int = 0
     input_rms: int = 0
