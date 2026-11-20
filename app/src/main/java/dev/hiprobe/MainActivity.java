@@ -37,6 +37,8 @@ public final class MainActivity extends Activity {
     private boolean checking,resumed;
     private JSONObject catalog;
     private Dialog picker;
+    private Dialog accountSettings;
+    private ProgressDialog resetProgress;
     private MediaPlayer preview;
     private TextView previewControl;
     private File previewFile;
@@ -61,6 +63,7 @@ public final class MainActivity extends Activity {
         getWindow().setStatusBarColor(PAPER);getWindow().setNavigationBarColor(PAPER);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if(profile.name().isEmpty())onboarding();else home();
+        if(getSharedPreferences("connection",MODE_PRIVATE).getBoolean("reset_pending",false))performAccountReset();
     }
     private String idleStatus(){
         String message=ListeningState.message;
@@ -187,7 +190,33 @@ public final class MainActivity extends Activity {
         String[] gender={profile.gender()};genderControls(fields,gender);
         TextView connection=action(fields,"Demo connection",0xffedf2e3,GREEN,v->connectionSettings());connection.setEnabled(!ListeningState.running);
         label(fields,"Any Voice · "+BuildConfig.VERSION_NAME+"\nBuilt for Build with Agora — Bengaluru 2026\nPowered by Agora RTC and Murf Falcon",12,MUTED,400);
-        AlertDialog dialog=new AlertDialog.Builder(this).setView(fields).setNegativeButton("Close",null).setPositiveButton("Save",null).create();dialog.setOnShowListener(v->dialog.getButton(-1).setOnClickListener(w->{if(name.getText().toString().trim().isEmpty()){name.setError("Enter your name");return;}profile.identity(name.getText().toString(),gender[0]);dialog.dismiss();home();}));dialog.show();
+        space(fields,18);action(fields,"Reset account",0xfff5e5df,0xff963e2e,v->confirmAccountReset());
+        ScrollView settingsScroll=new ScrollView(this);settingsScroll.addView(fields);
+        AlertDialog dialog=new AlertDialog.Builder(this).setView(settingsScroll).setNegativeButton("Close",null).setPositiveButton("Save",null).create();accountSettings=dialog;dialog.setOnShowListener(v->dialog.getButton(-1).setOnClickListener(w->{if(name.getText().toString().trim().isEmpty()){name.setError("Enter your name");return;}profile.identity(name.getText().toString(),gender[0]);dialog.dismiss();home();}));dialog.show();
+    }
+    private void confirmAccountReset(){
+        new AlertDialog.Builder(this).setTitle("Reset your account?")
+            .setMessage("Delete all tasks, saved memories, conversation history and captured translations for this phone? Your name, language and voice choices will also be cleared.\n\nThis cannot be undone.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Erase & restart",(dialog,which)->performAccountReset()).show();
+    }
+    private void performAccountReset(){
+                if(!getSharedPreferences("connection",MODE_PRIVATE).edit().putBoolean("reset_pending",true).commit()){toast("Could not start reset. Try again.");return;}
+                stopPreview();if(accountSettings!=null)accountSettings.dismiss();
+                stopService(new Intent(this,ListeningService.class));ScreenTools.cancel();
+                ProgressDialog progress=new ProgressDialog(this);resetProgress=progress;progress.setMessage("Resetting your account…");progress.setCancelable(false);progress.show();
+                network.execute(()->{try{
+                    new BackendClient(this).resetAccount();
+                    handler.post(()->{if(isDestroyed())return;try{
+                        for(String file:new String[]{"profile","conversation_settings","device_action_results","audio_output","screen_assist"})
+                            if(!getSharedPreferences(file,MODE_PRIVATE).edit().clear().commit())throw new IllegalStateException("Local reset incomplete. Try again.");
+                        ScreenTools.clearResults();ConversationState.clear();ConversationState.source="";ConversationState.translated="";ConversationState.speaker="";ConversationState.id="";ConversationState.message="Choose a partner language, then tap Start";
+                        BubbleState.enabled=false;BubbleState.active=false;BubbleState.inputAllowed=false;BubbleState.translationPending=false;BubbleState.waitingForReply=false;BubbleState.screenBusy=false;BubbleState.phase="disabled";BubbleState.heard="";BubbleState.reply="";
+                        ListeningState.sourceText="";ListeningState.translatedText="";ListeningState.detectedLanguage="";ListeningState.phrases=0;ListeningState.playingChunk=0;ListeningState.message="Ready when you are";
+                        profile=new UserProfile(this);voiceVolume=new OutputVolume(this);screenStatus=null;catalog=null;
+                        if(!getSharedPreferences("connection",MODE_PRIVATE).edit().remove("reset_pending").commit())throw new IllegalStateException("Reset pending");
+                        progress.dismiss();onboarding();toast("Account reset. Start fresh.");
+                    }catch(Exception failure){progress.dismiss();toast("Reset incomplete. Please try Reset account again.");}});
+                }catch(Exception error){handler.post(()->{if(isDestroyed())return;progress.dismiss();toast("Could not finish reset. Check your connection and try again.");});}});
     }
     private void sourceLanguageDialog(){
         if(ListeningState.running||BubbleState.enabled){toast("Disable Any Voice before changing the video language.");return;}
@@ -308,7 +337,7 @@ public final class MainActivity extends Activity {
     private void command(String action){startService(new Intent(this,ListeningService.class).setAction(action));}
     @Override protected void onResume(){super.onResume();resumed=true;handler.removeCallbacks(refresh);handler.post(refresh);}
     @Override protected void onPause(){resumed=false;stopPreview();handler.removeCallbacks(refresh);super.onPause();}
-    @Override protected void onDestroy(){stopPreview();if(picker!=null)picker.dismiss();network.shutdownNow();super.onDestroy();}
+    @Override protected void onDestroy(){stopPreview();if(picker!=null)picker.dismiss();if(accountSettings!=null)accountSettings.dismiss();if(resetProgress!=null)resetProgress.dismiss();network.shutdownNow();super.onDestroy();}
     private void updateText(TextView view,String value){if(!android.text.TextUtils.equals(view.getText(),value))view.setText(value);}
     private void toast(String value){if(!isFinishing()&&!isDestroyed())Toast.makeText(this,value,Toast.LENGTH_LONG).show();}
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}

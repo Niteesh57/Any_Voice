@@ -8,6 +8,10 @@ from anyvoice.unified import UnifiedPipeline
 from test_pipeline import configured,FakeCompletion
 
 class UnifiedTests(unittest.IsolatedAsyncioTestCase):
+ async def test_stopped_session_discards_late_conversation_captions(self):
+  p,s=self.pipeline();s.input_mode='bidir';calls=[]
+  p.conversation=SimpleNamespace(receive=lambda data:calls.append(data))
+  s.stopped.set();p.receive_caption(b'{}');self.assertFalse(calls)
  async def test_chunk_end_survives_early_playback_ack(self):
   from anyvoice.audio_queue import AudioQueue
   q=AudioQueue();self.addCleanup(q.close)

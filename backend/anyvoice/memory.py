@@ -37,6 +37,14 @@ class MemoryStore:
    CREATE TABLE IF NOT EXISTS caption_provenance(owner TEXT,session_id TEXT,segment_id TEXT,kind TEXT,source_kind TEXT,speaker_label TEXT,speaker_basis TEXT,rtc_session_id TEXT,PRIMARY KEY(owner,session_id,segment_id,kind));
   ''');self.db.commit()
  def close(self):self.db.close()
+ def reset(self,owner):
+  if not owner:raise ValueError('Device identity required')
+  # One transaction removes all content. Keep identity proof so retries after a
+  # lost HTTP response are safe and the phone retains its authenticated scope.
+  with self.lock,self.db:
+   for table in ('questions','tasks','memories','turns','events','receipts','actions','media_segments','caption_provenance'):
+    self.db.execute('DELETE FROM '+table+' WHERE owner=?',(owner,))
+   self.clear_screen_results(owner)
  def identity(self,owner,key):
   if len(owner)!=32 or any(c not in '0123456789abcdef' for c in owner) or not 32<=len(key)<=128:raise ValueError('Invalid device identity')
   proof=hashlib.sha256(key.encode()).hexdigest()

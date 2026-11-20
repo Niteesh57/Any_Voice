@@ -75,6 +75,7 @@ class UnifiedPipeline(BubblePipeline):
    self.log.info('input_requested session=%s mode=%s',self.session.id[:8],mode)
 
  def receive_caption(self,data):
+  if self.session.stopped.is_set():return
   if self.session.input_mode=='bidir':
    try:
     if self.conversation and self.conversation.receive(data):self.last_caption=time.monotonic()

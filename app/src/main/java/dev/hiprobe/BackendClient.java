@@ -75,6 +75,7 @@ final class BackendClient {
     void stopConversation(String id)throws Exception{request("POST","/v1/sessions/"+id+"/conversation/stop",new JSONObject());}
     void cancelResearch(String id) throws Exception{request("POST","/v1/sessions/"+id+"/cancel-research",new JSONObject());}
     JSONObject overview() throws Exception{return request("GET","/v1/me/overview",null);}
+    void resetAccount()throws Exception{request("POST","/v1/me/reset",new JSONObject());}
     JSONObject tool(String name,JSONObject args) throws Exception{return request("POST","/v1/me/tools",new JSONObject().put("request_id",java.util.UUID.randomUUID().toString()).put("name",name).put("arguments",args));}
     void deviceResult(String id,JSONObject result) throws Exception{request("POST","/v1/me/actions/"+id+"/result",result);}
     JSONObject voices() throws Exception { return request("GET", "/v1/voices", null); }
@@ -137,7 +138,7 @@ final class BackendClient {
         HttpURLConnection connection = (HttpURLConnection) new URL(base + path).openConnection();
         connection.setInstanceFollowRedirects(false);
         connection.setConnectTimeout(10000);
-        connection.setReadTimeout(path.equals("/v1/sessions") ? 80000 : path.endsWith("/stop") ? 45000 : 10000);
+        connection.setReadTimeout(path.equals("/v1/me/reset")?90000:path.equals("/v1/sessions") ? 80000 : path.endsWith("/stop") ? 45000 : 10000);
         connection.setRequestMethod(method);
         connection.setRequestProperty("Authorization", "Bearer " + access);
         connection.setRequestProperty("X-AnyVoice-Device",deviceId);connection.setRequestProperty("X-AnyVoice-Device-Key",deviceKey);

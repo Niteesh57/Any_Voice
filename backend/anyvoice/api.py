@@ -104,11 +104,11 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         for session in sessions.values():
             if session.audio: session.audio.close()
 
-    app = FastAPI(title="Any Voice", version="0.25", lifespan=lifespan)
+    app = FastAPI(title="Any Voice", version="0.26", lifespan=lifespan)
 
     @app.get("/health")
     async def health():
-        return {"service": "Any Voice", "version": "0.25"}
+        return {"service": "Any Voice", "version": "0.26"}
 
     @app.post("/v1/agent/idle/chat/completions", dependencies=[Depends(auth)])
     async def idle_callback():
@@ -322,6 +322,22 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
     async def cancel_research(sid: str,owner: str = Depends(device)):
         session=scoped(sid,owner);session.cancel_research=True;memory.clear_question(owner)
         return {"status":"cancelled"}
+
+    @app.post('/v1/me/reset',dependencies=[Depends(auth)])
+    async def reset_account(owner:str=Depends(device)):
+        if not owner:raise HTTPException(401,'Device identity required')
+        async with creating:
+            owned=[s for s in sessions.values() if s.owner==owner]
+            for session in owned:
+                session.cancel_research=True;session.stopped.set()
+                if session.task and not session.task.done():session.task.cancel()
+            await asyncio.gather(*(s.task for s in owned if s.task),return_exceptions=True)
+            for session in owned:
+                if session.audio:session.audio.close()
+                session.source=session.translated=session.context=''
+                sessions.pop(session.id,None)
+            memory.reset(owner)
+        return {'status':'reset'}
 
     @app.get("/v1/me/overview",dependencies=[Depends(auth)])
     async def overview(owner: str = Depends(device)):
