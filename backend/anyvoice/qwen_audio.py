@@ -1,4 +1,4 @@
-"""Qwen audio input / text-only output. Keys stay in the backend environment."""
+"""Bubble model client: legacy audio input or Agora transcripts, text output."""
 import base64
 import io
 import json
@@ -17,7 +17,15 @@ class QwenAudio:
   self.agent=MemoryAgent(self,store,owner,zone,apps,screen_enabled,session)
  def configured(self):
   value=urlparse(self.settings.bubble_llm_url)
-  return bool(self.settings.dashscope_key and self.settings.bubble_llm_model and value.scheme=="https" and value.netloc and not value.username and not value.password)
+  return bool(self.settings.llm_key and self.settings.bubble_llm_model and value.scheme=="https" and value.netloc and not value.username and not value.password)
+ def request_options(self):
+  if self.settings.bubble_llm_provider=="nvidia":
+   if 'omni' in self.settings.bubble_llm_model:return {"max_tokens":2048,"reasoning_budget":512}
+   return {"max_tokens":2048,"chat_template_kwargs":{"enable_thinking":False}}
+  return {"modalities":["text"],"enable_thinking":False}
+ async def answer_text(self,text):
+  if not hasattr(self,"agent"):raise ProviderError("Bubble memory tools are unavailable")
+  async for part in self.agent.answer(text):yield part
  async def answer(self,pcm):
   if hasattr(self,"agent"):
    async for text in self.agent.answer(pcm):yield text
@@ -40,7 +48,7 @@ class QwenAudio:
    "modalities":["text"],"stream":True,"stream_options":{"include_usage":True},"enable_thinking":False}
   text=""
   try:
-   async with self.client.stream("POST",self.settings.bubble_llm_url,headers={"Authorization":"Bearer "+self.settings.dashscope_key},json=payload) as response:
+   async with self.client.stream("POST",self.settings.bubble_llm_url,headers={"Authorization":"Bearer "+self.settings.llm_key},json=payload) as response:
     if response.status_code!=200:raise ProviderError("Qwen returned HTTP %d. Check the Bubble model, region and key."%response.status_code)
     async for line in response.aiter_lines():
      if not line.startswith("data:"):continue

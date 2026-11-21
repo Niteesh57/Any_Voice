@@ -18,16 +18,24 @@ class Settings:
     voice_provider: str = "murf-direct"
     auto_languages: tuple = ("en-IN", "hi-IN", "ta-IN", "te-IN")
     dashscope_key: str = ""
+    nvidia_key: str = ""
+    bubble_llm_provider: str = "qwen"
     bubble_llm_url: str = ""
     bubble_llm_model: str = ""
     memory_path: str = ":memory:"
     max_seconds: int = 900
+
+    @property
+    def llm_key(self):
+        return self.nvidia_key if self.bubble_llm_provider == "nvidia" else self.dashscope_key
 
     @classmethod
     def from_env(cls):
         return cls(
             memory_path=os.getenv("BUBBLE_MEMORY_PATH", "data/bubble.sqlite3"),
             auto_languages=tuple(x.strip() for x in os.getenv("AUTO_SOURCE_LANGUAGES", "en-IN,hi-IN,ta-IN,te-IN").split(",") if x.strip()),
+            nvidia_key=os.getenv("NVIDIA_API_KEY", ""),
+            bubble_llm_provider=os.getenv("BUBBLE_LLM_PROVIDER", "qwen"),
             dashscope_key=os.getenv("DASHSCOPE_API_KEY", ""),
             bubble_llm_url=os.getenv("BUBBLE_LLM_URL", ""),
             bubble_llm_model=os.getenv("BUBBLE_LLM_MODEL", ""),
@@ -54,6 +62,8 @@ class Settings:
         return [key for key, value in values.items() if not value or value.startswith("replace-with-")]
 
     def validate(self):
+        if self.bubble_llm_provider not in ("qwen", "nvidia"):
+            raise ValueError("BUBBLE_LLM_PROVIDER must be qwen or nvidia")
         if not 2 <= len(self.auto_languages) <= 4 or len(set(self.auto_languages)) != len(self.auto_languages) or "te-IN" not in self.auto_languages:
             raise ValueError("AUTO_SOURCE_LANGUAGES needs 2-4 unique languages including te-IN")
         if self.voice_provider not in ("murf-direct", "agora-engine"):

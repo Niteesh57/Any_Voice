@@ -50,7 +50,7 @@ class AgoraTransport:
 
         class CaptionObserver(IRTCLocalUserObserver):
             def on_stream_message(self, local, user_id, stream_id, data, length):
-                if str(user_id) in (str(session.stt_uid),str(session.conversation_stt_uid)):
+                if str(user_id) in (str(session.stt_uid),str(session.conversation_stt_uid),str(session.bubble_stt_uid)):
                     loop.call_soon_threadsafe(on_caption, bytes(data[:length]))
 
         class AudioObserver(IAudioFrameObserver):
