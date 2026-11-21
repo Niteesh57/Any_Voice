@@ -1,8 +1,10 @@
-<p align="center"><img src="docs/assets/any-voice.svg" alt="Any Voice — Hear it. Remember it. Do something with it." width="100%"></p>
+# Any Voice
+
+<p align="center"><strong>Hear it. Remember it. Do something with it.</strong></p>
 
 <p align="center"><strong>Your language. Your phone. A companion that remembers.</strong><br>Built for Build with Agora · Bengaluru · KNOTiC</p>
 
-<p align="center"><a href="https://github.com/Niteesh57/Any_Voice/releases/download/v0.20/AnyVoice-0.20.apk"><strong>↓ Download Android APK · v0.20</strong></a> · <a href="#a-demo-worth-showing">Demo walkthrough</a> · <a href="docs/verification-0.20.md">Verification record</a></p>
+<p align="center"><a href="https://github.com/Niteesh57/Any_Voice/releases/download/v0.20/AnyVoice-0.20.apk"><strong>↓ Download published APK · v0.20</strong></a> · <a href="#a-demo-worth-showing">Demo walkthrough</a> · <a href="docs/gemini-direct-audio.md">Current backend verification</a></p>
 
 You find a great cooking video. The recipe looks perfect. The person explaining it speaks a language you don’t understand.
 
@@ -25,7 +27,7 @@ The difference is the connection between them. A translation can become context 
 <img src="docs/assets/voices.png" alt="Live compatible Murf voice choices" width="30%">
 <img src="docs/assets/conversation.png" alt="Active bidirectional translator and floating bubble" width="30%">
 </p>
-<p align="center"><sub>Actual screens from the Android demo build.</sub></p>
+<p align="center"><sub>Actual screens from the published v0.20 demo. Build current source for the newer UI.</sub></p>
 
 ## A demo worth showing
 
@@ -49,7 +51,7 @@ This walkthrough combines implemented features. The verification record separate
 | **Agora Real-Time Speech-to-Text + translation** | Recognizes source speech and produces translated text for media and two-way conversation. There is no separate translation-model API in this route. |
 | **Agora Conversational AI Engine** | Provides Bubble’s speech-agent orchestration with Murf voice output. Bubble’s reasoning and tools run in our backend. |
 | **Murf AI Falcon 2.1** | Turns translated text and assistant responses into speech. The fast translation route uses persistent streaming WebSockets and parallel generation, with numbered output kept in playback order. |
-| **Qwen Omni** | Interprets spoken questions, reasons over retrieved context and screen evidence, and requests validated tools. Replies follow the selected language. The model is configured on the backend. |
+| **Google Gemini 3.1 Flash-Lite** | Understands Bubble’s microphone audio directly and returns text in the selected language. Uses saved context, screen evidence and validated tools; Murf supplies the spoken voice. |
 | **Persistent memory + tool calling** | SQLite stores tasks, preferences, conversation turns and attributed translation text. Typed tools retrieve evidence, update tasks and request acknowledged Android actions. |
 | **Native Android + Python/FastAPI + Docker** | Playback capture, microphone, floating overlay, AudioTrack and opt-in accessibility connect the experience to the phone; the backend keeps provider credentials off the APK. |
 
@@ -63,12 +65,14 @@ flowchart LR
     D --> E[Ordered audio queue → Android speaker]
     C --> M[(Source-aware SQLite memory)]
     Q[Ask Bubble · microphone] --> B
-    B --> L[Backend → Qwen reasoning + tools]
+    B --> L[Backend → Gemini direct audio + tools]
     M <--> L
     L --> T[Tasks · app launch · YouTube search · screen assist]
     L --> V[Agora Conversational AI Engine + Murf]
     V --> E
 ```
+
+Bubble’s audio goes directly to Gemini; it does not use a separate speech-to-text stage. Agora’s speech-to-text and translation service remains responsible for media and face-to-face translation.
 
 Generated PCM reaches the phone through an authenticated backend audio stream. RTC transports source audio; return audio uses that backend stream. During conversation translation, media/Bubble inputs are suspended while their connections remain available for reuse.
 
@@ -76,7 +80,7 @@ Generated PCM reaches the phone through an authenticated backend audio stream. R
 
 **“Where did I hear that?” should have an answer.** Media and face-to-face conversations have separate source labels, capture sessions, timestamps and paired original/translated text. Bubble can compare agreements and disagreements across them. Language-based speaker names are labels, not biometric identity.
 
-Memory is scoped to a private installation identity and key, so two devices’ records do not overlap. It survives voice-session changes and backend restarts when the data volume is retained. Saved facts and tasks can be reviewed in the app. Raw audio is not stored as persistent memory.
+Memory is scoped to a private installation identity and key, so two devices’ records do not overlap. It survives voice-session changes and backend restarts when the data volume is retained. Saved facts and tasks can be reviewed in the app. In the current Android source, **Reset account** at the bottom of profile settings clears that installation’s saved memory and tasks after confirmation. Raw audio is not stored as persistent memory.
 
 Recall uses bounded recent context and searchable records. It is not unlimited perfect recall, and clearing app data creates a new identity. See [memory and actions](docs/memory-tools.md), [media recall](docs/media-memory.md) and [source attribution](docs/bidirectional-translation.md).
 
@@ -84,15 +88,25 @@ Recall uses bounded recent context and searchable records. It is not unlimited p
 
 | Evidence | Recorded result | What it establishes |
 |---|---|---|
-| **v0.20 backend regression checks** | **75 tests passed** | Ordering, identity isolation, persistence, voice compatibility, attribution and failure handling. |
+| **Current Gemini backend regression checks** | **85 tests passed** | Direct WAV input, Gemini tool metadata, incomplete-stream safety, identity isolation and the existing translation/memory checks. |
+| **Live Gemini audio and tools** | Telugu replies, persistent fact recall, task creation/completion and a YouTube search request passed | Real provider calls with synthetic speech; device-action acknowledgements were simulated. |
+| **Full Bubble audio path** | Agora RTC → Gemini → Agora/Murf playback passed | Telugu memory save/recall and a YouTube search request; silence and low-level noise triggered no model requests in the test. |
 | **Native Android round trip** | Both English → Telugu and Telugu → English completed | Live Agora/Falcon integration and Android playback acknowledgments, using synthetic speech fixtures. |
 | **Connection reuse** | Same session across media → interpreter → media → Bubble → media | Mode changes can reuse connections instead of rebuilding the main session. |
 | **Controlled warm TTS comparison, v0.9** | **224 ms direct Falcon vs 579 ms Engine median time to first PCM** | Three identical Telugu texts, same host, alternating routes. About 61% lower first-PCM latency in this small comparison—not total translation latency. |
-| **Source disagreement check** | Video: two minutes; conversation: three minutes | A live Qwen response distinguished the instructions and attributed both sources. |
+| **Historical source disagreement check** | Video: two minutes; conversation: three minutes | The earlier Qwen-based build distinguished the instructions and attributed both sources. This is historical evidence, not a Gemini-specific benchmark. |
 
 The TTS comparison is a historical component benchmark, not a v0.20 latency guarantee. Recognition, translation context, network and queue time can still make complete turns take several seconds. Numbered chunks finish in order; this does not promise lip sync or zero delay.
 
-Read the [v0.20 verification record](docs/verification-0.20.md) and [timing/validation history](VALIDATION.md) for scope, methods and remaining checks. Android build and lint passed. Real two-person room noise, overlapping speech and every language/voice combination still need broader testing.
+Read the [current Gemini verification record](docs/gemini-direct-audio.md), [published v0.20 verification](docs/verification-0.20.md) and [timing/validation history](VALIDATION.md) for scope, methods and remaining checks. Android build and lint passed. Real two-person room noise, overlapping speech and every language/voice combination still need broader testing.
+
+## Shorter speech, familiar words
+
+Bubble already receives instructions to answer briefly. The next improvement we discussed is concise spoken translation: keep the meaning, use everyday phrasing, and retain familiar English terms when they are clearer than a long formal translation.
+
+For example: **“ముందు appకి microphone permission ఇవ్వండి.”** A short, natural instruction can be easier to follow than translating every technical word.
+
+This extra rewriting step is **proposed, not enabled**. Murf Falcon supports mixed-language speech, while `locale` guides pronunciation; it does not shorten the text. Our app already sends the selected voice’s supported locale. Shortening media translation would require rewriting the translated text before Murf, and we would need to measure whether the shorter playback offsets that extra processing time. It would not guarantee video sync. See [Murf’s language and speaking controls](https://murf.ai/api/docs/text-to-speech/speech-customization).
 
 ## The connected device is already in your pocket
 
@@ -114,14 +128,23 @@ That everyday use is also the business opportunity for Agora and Murf. Each tran
 
 <img src="docs/assets/download-qr.svg" alt="Scan to download the Any Voice 0.20 Android APK" width="160">
 
-**Android 10+ · ARM64 demo build.** Scan the QR on your phone or use the download link. This is a debug hackathon APK, not a Play Store release. It needs an online configured backend; downloading it alone does not provide a hosted service.
+**Android 10+ · ARM64 demo build.** Scan the QR on your phone or use the download link. The published download is v0.20, an older debug hackathon APK, not a Play Store release. Current source includes later UI and account-reset changes; build from source for those Android updates. It needs an online configured backend; downloading it alone does not provide a hosted service.
 
 Install, open **Profile → Demo connection**, and enter the backend URL and app access token supplied by the person running the demo. Choose your language and a compatible voice, preview it, then enable Any Voice. Grant playback capture/overlay/microphone access for the features you use; Screen assist requires a separate accessibility grant. Conversation translation starts only when you explicitly enable it and stops on lock.
 
 <details>
 <summary><strong>Run the backend and build the APK</strong></summary>
 
-Copy [backend/.env.example](backend/.env.example) to `backend/.env` and configure Agora, Murf and Qwen credentials there. Keep it private. See [backend setup](backend/README.md) for provider settings.
+Copy [backend/.env.example](backend/.env.example) to `backend/.env` and configure Agora, Murf and Gemini credentials there. Keep it private. For Bubble’s current direct-audio route, set:
+
+```dotenv
+BUBBLE_LLM_PROVIDER=gemini
+BUBBLE_LLM_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+BUBBLE_LLM_MODEL=gemini-3.1-flash-lite
+GEMINI_API_KEY=your-private-key
+```
+
+Enable Agora RTC, Real-Time Speech-to-Text/translation, Conversational AI Engine and Signaling for the configured project. Project credentials alone do not activate those services. See [backend setup](backend/README.md) for provider settings.
 
 ```powershell
 docker build -t anyvoice-backend:dev backend
@@ -136,7 +159,7 @@ cd backend
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-The saved rollback is [verified v0.19](docs/verified-baseline-0.19.md). Match the source, backend and APK when reverting.
+For the current backend rollback point, see [Gemini setup and verification](docs/gemini-direct-audio.md). The older [verified v0.19 baseline](docs/verified-baseline-0.19.md) remains documented separately. Match the source, backend configuration and APK when reverting.
 
 </details>
 

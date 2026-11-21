@@ -12,6 +12,21 @@ The intersection with Agora's verified transcription/translation locale table is
 
 `AUTO_SOURCE_LANGUAGES=en-IN,hi-IN,ta-IN,te-IN` is the default detection shortlist (2–4 entries). If the selected target is outside it, the target replaces the last entry so same-language passthrough remains possible. The app shows this shortlist. Automatic detection is not simultaneous detection of every language in the voice library.
 
+## Bubble: direct audio with Gemini
+
+Bubble’s microphone audio travels through Agora RTC, then goes directly to Gemini as WAV audio. Gemini returns text and tool requests; Agora Conversational AI Engine and Murf Falcon speak the response. Media and face-to-face translation continue to use Agora STT/translation.
+
+Set these values in the private `.env` file:
+
+```dotenv
+BUBBLE_LLM_PROVIDER=gemini
+BUBBLE_LLM_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+BUBBLE_LLM_MODEL=gemini-3.1-flash-lite
+GEMINI_API_KEY=your-private-key
+```
+
+The backend preserves Gemini’s tool-call IDs and required metadata, validates actions, and scopes memory to the phone’s installation identity. See [direct-audio verification](../docs/gemini-direct-audio.md) for tests, observed timing and rollback. Concise mixed-language rewriting of media translation is a proposed improvement; it is not enabled by changing Murf’s `locale`.
+
 ## APIs
 
 All `/v1/` requests require `Authorization: Bearer <ANYVOICE_ACCESS_TOKEN>`.
@@ -31,10 +46,10 @@ The native Agora Server SDK needs Linux; use Docker from the repository root:
 
 ```powershell
 docker build -t anyvoice-backend:dev backend
-docker run -d --name anyvoice-backend --restart unless-stopped --env-file backend/.env -p 8000:8000 anyvoice-backend:dev
+docker run -d --name anyvoice-backend --restart unless-stopped --env-file backend/.env -e BUBBLE_MEMORY_PATH=/data/bubble.sqlite3 -v anyvoice-memory:/data -p 8000:8000 anyvoice-backend:dev
 ```
 
-Use a single Uvicorn worker because session ownership is in memory. Enable RTC and STT/Translation on Agora; the optional Engine route also requires Conversational AI and Signaling. Its authenticated inert LLM callback generates no text and calls no external model.
+Use a single Uvicorn worker because session ownership is in memory. Enable RTC and STT/Translation on Agora. The unified Any Voice experience also requires Conversational AI and Signaling for Bubble, including when media translation uses the direct Murf route. Enable these services for the configured project; supplying new project keys does not activate them. Its authenticated inert LLM callback generates no text and calls no external model.
 
 Tests run from this directory: `.\.venv\Scripts\python.exe -m unittest discover -s tests -q`. See root `VALIDATION.md` for observations and limitations. Working 0.11 rollback: `anyvoice-backend:rollback-v0.11` with the matching Git tag and APK.
 
