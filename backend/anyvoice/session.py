@@ -23,7 +23,6 @@ class Session:
     conversation_stt_uid: int = 5001
     worker_uid: int = 2001  # Conversational AI voice agent; Android subscribes to this UID.
     control_uid: int = 3001
-    bubble_stt_uid: int = 6001
     stt_uid: int = 4001
     state: str = "connecting"
     message: str = "Connecting your translation and voice"

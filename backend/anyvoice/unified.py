@@ -12,7 +12,6 @@ class UnifiedServices(AgoraServices):
  async def open_stt(self):
   await self.open_completion()
   await super().open_stt()
-  await self.open_bubble_stt()
   await self.open_voice()
 
 class UnifiedPipeline(BubblePipeline):
@@ -77,8 +76,6 @@ class UnifiedPipeline(BubblePipeline):
 
  def receive_caption(self,data):
   if self.session.stopped.is_set():return
-  if self.session.input_mode=='bubble':
-   BubblePipeline.receive_caption(self,data);return
   if self.session.input_mode=='bidir':
    try:
     if self.conversation and self.conversation.receive(data):self.last_caption=time.monotonic()
@@ -135,7 +132,7 @@ class UnifiedPipeline(BubblePipeline):
    if s.input_mode=='bubble' and s.bubble_state in ('thinking','speaking'):
     if s.audio.next_sequence-1>s.audio.acknowledged:s.bubble_state='speaking'
     if self.generation_done and played and s.audio.acknowledged>=self.response_end:
-     self.generation_done=False;self.vad.reset();self.reset_command();self.ignore_until=now+.35
+     self.generation_done=False;self.vad.reset();self.ignore_until=now+.35
      s.bubble_state='listening';s.message='Bubble is listening'
    if s.desired_input==s.input_mode:continue
    if s.input_mode in ('media','bidir'):
@@ -145,7 +142,7 @@ class UnifiedPipeline(BubblePipeline):
    old_input=s.input_mode;s.input_mode=s.desired_input;s.route_epoch+=1
    if old_input=='bubble' and s.input_mode!='bubble':
     self.parallel.next_number=self.engine_chunk+1;self.parallel.next_release=self.engine_chunk+1
-   self.vad.reset();self.reset_command();self.ignore_until=now+.35
+   self.vad.reset();self.ignore_until=now+.35
    s.source='';s.translated=''
    if s.input_mode=='bubble':
     self.engine_chunk=self.parallel.next_number-1

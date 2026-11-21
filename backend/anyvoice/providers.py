@@ -14,7 +14,6 @@ class AgoraServices:
             auth=httpx.BasicAuth(settings.agora_customer_id, settings.agora_customer_secret), timeout=20,
         )
         self.stt_id = self.agent_id = None
-        self.bubble_stt_id=None
         self.conversation_stt_id=None;self.conversation_pair=None
         self.conversation_lock=asyncio.Lock();self.closing=False
         self.project = "https://api.agora.io/api/"
@@ -54,18 +53,6 @@ class AgoraServices:
         self.stt_id = result.get("agent_id")
         if not self.stt_id:
             raise ProviderError("Agora did not return the translation agent ID")
-
-    async def open_bubble_stt(self):
-        if self.settings.bubble_llm_provider!='nvidia' or self.bubble_stt_id:return
-        s=self.session
-        languages=list(dict.fromkeys((s.target_language,'en-IN')))
-        result=await self.request('POST',self.base('stt')+'/join',{
-            'name':'av_bubble_'+s.id,'languages':languages,'maxIdleTime':900,
-            'rtcConfig':{'channelName':s.channel,'pubBotUid':str(s.bubble_stt_uid),
-                'pubBotToken':self.token(s.bubble_stt_uid),
-                'subscribeAudioUids':[str(s.microphone_uid if s.mode=='unified' else s.source_uid)],'enableJsonProtocol':True}})
-        self.bubble_stt_id=result.get('agent_id')
-        if not self.bubble_stt_id:raise ProviderError('Agora did not return the Bubble recognizer ID')
 
     async def open_voice(self):
         s = self.session
@@ -130,7 +117,7 @@ class AgoraServices:
 
     async def _close(self):
         errors = []
-        for kind, identity in (("stt", self.stt_id), ("stt",self.bubble_stt_id), ("stt",self.conversation_stt_id), ("voice", self.agent_id)):
+        for kind, identity in (("stt", self.stt_id), ("stt",self.conversation_stt_id), ("voice", self.agent_id)):
             if identity:
                 try:
                     await self.request("POST", self.base(kind) + f"/agents/{identity}/leave", {})

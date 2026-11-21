@@ -125,7 +125,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         native = native_check()
         return {"configured": not missing and native, "missing": missing,
                 "memory_tools": True,
-                "bubble_configured": bool(settings.llm_key and settings.bubble_llm_url and settings.bubble_llm_model),
+                "bubble_configured": bool(settings.dashscope_key and settings.bubble_llm_url and settings.bubble_llm_model),
                 "worker_available": native, "source_language": "auto", "source_languages": settings.auto_languages, "target_selection": "voice-library",
                 "source_language_options": [{"locale":code,"name":name} for code,name in sorted(AGORA_LANGUAGES.items(),key=lambda row:row[1])],
                 "message": "Ready" if not missing and native else "Configure provider credentials and run the Linux worker"}
@@ -164,8 +164,8 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
         try:ZoneInfo(request.timezone)
         except (ZoneInfoNotFoundError,ValueError):raise HTTPException(422,"Choose a valid timezone")
         if any(len(k)>200 or len(v)>100 for k,v in request.device_apps.items()):raise HTTPException(422,"Invalid app capabilities")
-        if request.mode in ("bubble","unified") and not (settings.llm_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
-            raise HTTPException(503,"Configure Bubble model credentials on the backend")
+        if request.mode in ("bubble","unified") and not (settings.dashscope_key and settings.bubble_llm_url.startswith("https://") and settings.bubble_llm_model):
+            raise HTTPException(503,"Configure Bubble Qwen credentials on the backend")
         if (request.source_language != "auto" and not agora_locale(request.source_language)) or not agora_locale(request.target_language):
             raise HTTPException(422, "Select supported source and output languages")
         try:
@@ -192,7 +192,7 @@ def create_app(settings=None, pipeline_factory=Pipeline, native_check=native_ava
                 source_language="auto" if request.source_language == "auto" else agora_locale(request.source_language),
                 source_languages=(settings.auto_languages if agora_locale(request.target_language) in settings.auto_languages else (*settings.auto_languages[:3],agora_locale(request.target_language))) if request.source_language == "auto" else (agora_locale(request.source_language),))
             if request.mode == "bubble":
-                session.source_languages=("en-IN",)  # Bubble's recognizer selects its own microphone languages.
+                session.source_languages=("en-IN",)  # Command audio goes directly to Qwen, without an STT bot.
             sessions[session.id] = session
             session.input_mode=request.input_mode;session.desired_input=request.input_mode
             try:

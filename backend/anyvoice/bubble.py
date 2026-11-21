@@ -5,19 +5,14 @@ import logging
 import time
 from collections import deque
 from dataclasses import replace
-from .captions import speech_chunks,decode_message
+from .captions import speech_chunks
 from .providers import AgoraServices,ProviderError
 from .session import Pipeline,token_for
 from .qwen_audio import QwenAudio
 
 class CommandVad:
  """Bounded PCM endpoint detector; command audio remains in memory only."""
- def __init__(self,speech_only=False):
-  self.noise=15;self.background=deque(maxlen=100);self.detector=None
-  if speech_only:
-   import webrtcvad
-   self.detector=webrtcvad.Vad(2)
-  self.reset()
+ def __init__(self):self.noise=15;self.background=deque(maxlen=100);self.reset()
  def reset(self):self.frames=[];self.pre=deque(maxlen=10);self.voiced=0;self.silent=0;self.size=0
  def observe_background(self,pcm):
   if pcm and not len(pcm)%2:
@@ -28,9 +23,6 @@ class CommandVad:
   if not pcm or len(pcm)%2:return None
   rms=audioop.rms(pcm,2)
   speech=rms>=max(45,self.noise*3)
-  if speech and self.detector:
-   frames=[pcm[i:i+320] for i in range(0,len(pcm)-319,320)]
-   speech=bool(frames) and sum(self.detector.is_speech(frame,16000) for frame in frames)>=max(1,len(frames)//2)
   if not speech and not self.frames:self.noise=self.noise*.95+rms*.05
   duration=len(pcm)/32000
   if not self.frames:
@@ -47,7 +39,8 @@ class CommandVad:
 
 class BubbleServices(AgoraServices):
  async def open_stt(self):
-  await self.open_bubble_stt()
+  # Direct microphone audio goes to Qwen; no wake recognizer or STT bot.
+  pass
 
 class BubblePipeline(Pipeline):
  def __init__(self,settings,session,transport=None,services=None,completion=None,qwen=None):
@@ -59,62 +52,19 @@ class BubblePipeline(Pipeline):
   self.qwen=qwen or QwenAudio(self.settings,session.target_language,session.context)
   if session.owner and session.memory_store and not qwen:
    self.qwen.use_memory(session.memory_store,session.owner,session.timezone,session.device_apps,session.screen_tools,session)
-  self.text_input=settings.bubble_llm_provider=="nvidia"
-  self.command_captions={};self.caption_seen=set();self.caption_time=0;self.command_pending=False;self.last_command_end=0
   self.rtc.on_input_pcm=self.receive_input_pcm
-  self.vad=CommandVad(speech_only=self.text_input);self.answer_task=None;self.listening_deadline=0
-  self.caption_floor_ms=time.time()*1000
+  self.vad=CommandVad();self.answer_task=None;self.listening_deadline=0
   self.generation_done=False;self.response_end=0;self.ignore_until=0;self.response_chunks=asyncio.Queue();self.voice_last_packet=0
- def reset_command(self):
-  self.command_captions.clear();self.command_pending=False;self.caption_time=0;self.last_command_end=0
-  self.caption_floor_ms=time.time()*1000
  def receive_caption(self,data):
-  if not self.text_input or self.session.stopped.is_set() or self.session.bubble_state!="listening" or time.monotonic()<self.ignore_until:return
-  if self.session.mode=='unified' and (self.session.input_mode!='bubble' or self.session.desired_input!='bubble'):return
-  uid=self.session.microphone_uid if self.session.mode=='unified' else self.session.source_uid
-  try:
-   for item in decode_message(data,uid,self.session.target_language):
-    if item['kind']!='source' or not item['final'] or not item['id'] or item['id'] in self.caption_seen:continue
-    stamp=item.get('offset')
-    if isinstance(stamp,(int,float)) and stamp>1e12 and stamp<self.caption_floor_ms:continue
-    text=item['text'].strip()
-    if not text or not any(c.isalnum() for c in text) or text.casefold().strip('[]() .!') in ('music','background music','silence','noise','applause','inaudible','unintelligible'):continue
-    if not self.vad.frames and not self.command_pending:continue
-    if len(self.command_captions)>=32 or sum(map(len,self.command_captions.values()))+len(text)>3000:continue
-    self.command_captions[item['id']]=text;self.caption_time=time.monotonic()
-  except (ValueError,TypeError,KeyError):self.log.warning('bubble_caption_invalid')
- async def finish_command(self):
-  started=time.monotonic()
-  try:
-   while time.monotonic()-started<4:
-    if self.session.stopped.is_set():return
-    if self.session.mode=='unified' and (self.session.input_mode!='bubble' or self.session.desired_input!='bubble'):return
-    if self.vad.frames:await asyncio.sleep(.05);continue
-    if self.command_captions and time.monotonic()-self.caption_time>=.25:break
-    await asyncio.sleep(.05)
-   if not self.command_captions or self.vad.frames:return
-   text=' '.join(self.command_captions.values())
-   self.caption_seen.update(self.command_captions)
-   if len(self.caption_seen)>2000:raise ProviderError('Bubble caption limit reached; start a new session')
-   self.session.source=text;self.session.bubble_state='thinking';self.session.message='Bubble is thinking';self.generation_done=False
-   self.log.info('bubble_latency stage=stt_final_wait ms=%.0f chars=%d',(time.monotonic()-self.last_command_end)*1000,len(text))
-   await self.answer(text)
-  except asyncio.CancelledError:raise
-  except Exception as exc:self.fail(str(exc) if isinstance(exc,ProviderError) else 'Bubble could not process the transcript')
-  finally:self.reset_command()
+  pass
  def receive_input_pcm(self,pcm):
   self.session.input_frames+=1
   self.session.input_rms=audioop.rms(pcm,2) if pcm and not len(pcm)%2 else 0
   self.session.max_input_rms=max(self.session.max_input_rms,self.session.input_rms)
   if self.session.bubble_state=="standby":self.vad.observe_background(pcm)
   if self.session.stopped.is_set() or self.session.bubble_state!="listening" or time.monotonic()<self.ignore_until:return
-  had_frames=bool(self.vad.frames);command=self.vad.feed(pcm)
-  if self.text_input and had_frames and not self.vad.frames and not command and not self.command_pending:self.reset_command()
+  command=self.vad.feed(pcm)
   if command:
-   if self.text_input:
-    self.command_pending=True;self.last_command_end=time.monotonic()
-    if not self.answer_task or self.answer_task.done():self.answer_task=asyncio.create_task(self.finish_command())
-    return
    self.session.bubble_state="thinking";self.session.message="Bubble is thinking";self.generation_done=False
    self.listening_deadline=0
    self.answer_task=asyncio.create_task(self.answer(command))
@@ -125,10 +75,9 @@ class BubblePipeline(Pipeline):
   pending="";answer="";first=True;started=time.monotonic()
   try:
    self.session.translated=""
-   response=self.qwen.answer_text(pcm) if isinstance(pcm,str) else self.qwen.answer(pcm)
-   async for delta in response:
+   async for delta in self.qwen.answer(pcm):
     if first:
-     self.log.info("bubble_latency stage=llm_first_text ms=%.0f",(time.monotonic()-started)*1000);first=False
+     self.log.info("bubble_latency stage=qwen_first_text ms=%.0f",(time.monotonic()-started)*1000);first=False
     pending+=delta;answer+=delta;self.session.translated=answer
     if len(pending)>=30 and (any(c in delta for c in ".!?।。！？\n") or len(pending.encode())>=400):
      for chunk in speech_chunks(pending):await self.response_chunks.put(chunk)
@@ -165,7 +114,7 @@ class BubblePipeline(Pipeline):
    if now-self.session.created>self.settings.max_seconds:raise ProviderError("Bubble session limit reached. Tap Ask Bubble again.")
    if now-self.session.touched>25:raise ProviderError("Bubble disconnected.")
    if self.generation_done and self.session.audio.acknowledged>=self.response_end:
-    self.generation_done=False;self.vad.reset();self.reset_command();self.ignore_until=now+.35
+    self.generation_done=False;self.vad.reset();self.ignore_until=now+.35
     self.session.bubble_state="listening";self.session.message="Bubble is listening to your command";self.listening_deadline=now+25
  async def run(self):
   try:
